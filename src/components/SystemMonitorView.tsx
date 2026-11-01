@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Activity, Cpu, Fan, Gauge, HardDrive, Zap } from 'lucide-react';
 import { HardwareState, SystemStats } from '../types/hardware';
 import { RevTickBar, MeterTone } from './ui/RevTickBar';
+import { setVendorBusActive } from '../state/vendorBus';
 
 interface VendorMessagePayload {
   topic: string;
@@ -92,6 +93,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     }
     vendorOnlineRef.current = true;
     setVendorOnline(true);
+    setVendorBusActive(true);
   };
 
   const refreshVendorBus = async (): Promise<boolean> => {
@@ -105,6 +107,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
       vendorOnlineRef.current = false;
       setVendorOnline(false);
       setVendorBoost(null);
+      setVendorBusActive(false);
       return false;
     } finally {
       vendorPending.current = false;
@@ -157,6 +160,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     return () => {
       stopped = true;
       window.clearTimeout(timer);
+      setVendorBusActive(false);
     };
   }, []);
 
