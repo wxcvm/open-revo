@@ -141,6 +141,11 @@ pub async fn vendor_set_kb_backlight(enabled: bool) -> Result<VendorResponse, St
 }
 
 #[tauri::command]
+pub fn vendor_service_state() -> vendor_bus::VendorServiceState {
+    vendor_bus::service_state()
+}
+
+#[tauri::command]
 pub fn vendor_stack_present() -> bool {
     vendor_bus::vendor_stack_present()
 }

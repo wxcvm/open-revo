@@ -149,7 +149,7 @@ fn open() -> Result<TcpStream, String> {
     }
 }
 
-fn drain(stream: &mut TcpStream, budget: Duration) -> Vec<BusMessage> {
+fn drain(stream: &mut TcpStream, budget: Duration, min_replies: usize) -> Vec<BusMessage> {
     let deadline = Instant::now() + budget;
     let mut messages: Vec<BusMessage> = Vec::new();
     let mut last_message_at = Instant::now();
@@ -168,6 +168,9 @@ fn drain(stream: &mut TcpStream, budget: Duration) -> Vec<BusMessage> {
                     if let Some(message) = parse_publish(&body) {
                         messages.push(message);
                         last_message_at = Instant::now();
+                        if messages.len() >= min_replies {
+                            break;
+                        }
                     }
                 }
             }
@@ -204,7 +207,7 @@ pub fn command(topic: &str, payload: &str, budget: Duration) -> Result<Vec<BusMe
     wait_suback(&mut stream, SUBACK_WAIT.min(budget));
     stream.write_all(&publish_packet(topic, payload)).ok();
     let remaining = budget.saturating_sub(started.elapsed());
-    Ok(drain(&mut stream, remaining))
+    Ok(drain(&mut stream, remaining, 1))
 }
 
 pub fn batch(requests: &[(&str, &str)], budget: Duration) -> Result<Vec<BusMessage>, String> {
@@ -216,7 +219,7 @@ pub fn batch(requests: &[(&str, &str)], budget: Duration) -> Result<Vec<BusMessa
         stream.write_all(&publish_packet(topic, payload)).ok();
     }
     let remaining = budget.saturating_sub(started.elapsed());
-    Ok(drain(&mut stream, remaining))
+    Ok(drain(&mut stream, remaining, requests.len()))
 }
 
 pub fn is_available() -> bool {
@@ -310,6 +313,48 @@ pub fn restore_fan_curve() -> Result<Vec<BusMessage>, String> {
         "{\"Action\":\"RESTORE_FAN_SPEED_CURVE_SETTING_ALL\"}",
         REQUEST_BUDGET,
     )
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct VendorServiceState {
+    pub present: bool,
+    pub running: bool,
+    pub auto_start: bool,
+}
+
+fn sc_query_contains(args: &[&str], needle: &str) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        if let Ok(output) = std::process::Command::new("sc.exe")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            return text.contains(needle);
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (args, needle);
+        false
+    }
+}
+
+/// Service presence / runtime state, used to decide who owns the vendor stack.
+pub fn service_state() -> VendorServiceState {
+    let present = vendor_stack_present();
+    if !present {
+        return VendorServiceState::default();
+    }
+    VendorServiceState {
+        present,
+        running: sc_query_contains(&["query", "GCUBridge"], "RUNNING"),
+        auto_start: sc_query_contains(&["qc", "GCUBridge"], "AUTO_START"),
+    }
 }
 
 /// Whether the vendor control-center binaries are still installed.

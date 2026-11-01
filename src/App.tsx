@@ -6,6 +6,7 @@ import { HardwareState, PowerMode } from './types/hardware';
 import { MiniDrawer } from './components/MiniDrawer';
 import { FullDashboard } from './components/FullDashboard';
 import { ModelCapabilities } from './plugins/plugin_manifest';
+import { setVendorBusActive } from './state/vendorBus';
 
 const BLD_PREVIEW_STATE: HardwareState = {
   power_mode: 2,
@@ -140,6 +141,18 @@ export default function App() {
   const realCapabilitiesRef = useRef<ModelCapabilities | undefined>(isBldPreview ? BLD_PREVIEW_CAPABILITIES : undefined);
   const [capabilities, setCapabilities] = useState<ModelCapabilities | undefined>(isBldPreview ? BLD_PREVIEW_CAPABILITIES : undefined);
   const [previewMode, setPreviewMode] = useState<'real' | 'thin_light' | 'gaming'>('real');
+
+  useEffect(() => {
+    if (isBldPreview) return;
+    // 服务常驻（AUTO_START）时说明厂商栈由我们托管，隐藏“接管官方控制台”提示
+    invoke<{ present: boolean; running: boolean; auto_start: boolean }>('vendor_service_state')
+      .then((state) => {
+        if (state.present && state.running && state.auto_start) {
+          setVendorBusActive(true);
+        }
+      })
+      .catch(() => undefined);
+  }, [isBldPreview]);
 
   useEffect(() => {
     if (isBldPreview) return;

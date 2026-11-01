@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -120,6 +120,20 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   const formatKbTimer = (sec: number): string => (sec <= 0 ? '永不关闭' : Math.round(sec / 60) + ' 分钟');
 
+  const kbBusRef = useRef(kbBus);
+  useEffect(() => {
+    kbBusRef.current = kbBus;
+  }, [kbBus]);
+
+  const refreshKbBusWithRetry = async (attempts = 3) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const online = await refreshKbBus().then(() => kbBusRef.current.online).catch(() => false);
+      if (online) return true;
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+    }
+    return false;
+  };
+
   const refreshKbBus = async () => {
     try {
       const res = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_bus_probe');
@@ -143,7 +157,13 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     void invoke<boolean>('vendor_stack_present')
       .then((present) => setKbStackPresent(present))
       .catch(() => setKbStackPresent(true));
-    void refreshKbBus();
+    void refreshKbBusWithRetry();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refreshKbBus();
+      }
+    }, 15000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const applyKbTimer = async (sec: number) => {
