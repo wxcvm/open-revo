@@ -141,8 +141,14 @@ pub fn collect_hardware_state(
     // Generic WDDM fallback: NVAPI only speaks NVIDIA. On AMD / Intel iGPU machines
     // (e.g. Ryzen AI 9 HX 365 + Radeon 880M) utilisation comes from PDH GPU Engine counters,
     // so the 系统监控 显卡 card never stays pinned at 0 %.
-    let gpu_usage = if query_gpu && !has_gpu {
-        crate::system::gpu_engine::sample_usage()
+    let gpu_usage = if query_gpu {
+        let engine_usage = crate::system::gpu_engine::sample_usage();
+        let is_nvidia = gpu_name.to_ascii_uppercase().contains("NVIDIA");
+        if is_nvidia {
+            nvapi_gpu_usage
+        } else {
+            nvapi_gpu_usage.max(engine_usage)
+        }
     } else {
         nvapi_gpu_usage
     };

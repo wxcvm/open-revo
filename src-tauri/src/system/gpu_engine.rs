@@ -133,14 +133,15 @@ pub fn sample_usage() -> u32 {
 unsafe fn read_3d_sum(api: &PdhApi, poll: &EnginePoll) -> u32 {
     let mut buffer_size = 0u32;
     let mut item_count = 0u32;
-    let probe = (api.get_array)(
+    // Size probe intentionally returns PDH_MORE_DATA (0x80000712) with the required size.
+    let _ = (api.get_array)(
         poll.counter,
         PDH_FMT_DOUBLE,
         &mut buffer_size,
         &mut item_count,
         std::ptr::null_mut(),
     );
-    if probe != 0 || buffer_size == 0 || item_count == 0 || item_count > 4096 {
+    if buffer_size == 0 || item_count == 0 || item_count > 4096 {
         return 0;
     }
     let mut buffer = vec![0u8; buffer_size as usize];

@@ -79,6 +79,8 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, ma
   const fanCeiling = maxFanRpm && maxFanRpm > 0 ? maxFanRpm : DEFAULT_FAN_CEILING;
   const cpuFan = status.cpu_fan_rpm ?? 0;
   const gpuFan = status.gpu_fan_rpm ?? 0;
+  // 无独显的小型机（XINGYAO / Ryzen AI 9 这类）没有 GPU 风扇通道，隐藏该行避免 "-- RPM" 噪音
+  const hasGpuFanChannel = hasDedicatedVram || gpuFan > 0;
   const cpuFanPct = clampPct((cpuFan / fanCeiling) * 100);
   const gpuFanPct = clampPct((gpuFan / fanCeiling) * 100);
 
@@ -185,15 +187,26 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, ma
             </div>
           )}
 
-          <div className="mon-plain">
-            <span className="mon-plain-label">核心频率</span>
-            <span className="mon-plain-value">{status.gpu_core_freq ? `${status.gpu_core_freq} MHz` : '-- MHz'}</span>
-          </div>
+          {(status.gpu_core_freq ?? 0) > 0 && (
+            <div className="mon-plain">
+              <span className="mon-plain-label">核心频率</span>
+              <span className="mon-plain-value">{status.gpu_core_freq} MHz</span>
+            </div>
+          )}
 
-          <div className="mon-plain">
-            <span className="mon-plain-label">温度</span>
-            <span className="mon-plain-value">{gpuTemp > 0 ? `${gpuTemp} °C` : '-- °C'}</span>
-          </div>
+          {gpuTemp > 0 && (
+            <div className="mon-plain">
+              <span className="mon-plain-label">温度</span>
+              <span className={`mon-plain-value is-${meterTone(tempPct)}`}>{gpuTemp} °C</span>
+            </div>
+          )}
+
+          {!hasDedicatedVram && (
+            <div className="mon-plain">
+              <span className="mon-plain-label">适配器</span>
+              <span className="mon-plain-value">{status.gpu_name || '核显 / 共享显存'}</span>
+            </div>
+          )}
         </section>
 
         <section className="mon-card">
@@ -265,13 +278,15 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, ma
             <RevTickBar value={cpuFanPct} />
           </div>
 
-          <div className="mon-row">
-            <div className="mon-row-head">
-              <span className="mon-row-label">显卡</span>
-              <span className="mon-row-value">{gpuFan > 0 ? `${gpuFan} RPM` : '-- RPM'}</span>
+          {hasGpuFanChannel && (
+            <div className="mon-row">
+              <div className="mon-row-head">
+                <span className="mon-row-label">显卡</span>
+                <span className="mon-row-value">{gpuFan > 0 ? `${gpuFan} RPM` : '-- RPM'}</span>
+              </div>
+              <RevTickBar value={gpuFanPct} />
             </div>
-            <RevTickBar value={gpuFanPct} />
-          </div>
+          )}
 
           <div className="mon-plain">
             <span className="mon-plain-label">散热策略</span>
