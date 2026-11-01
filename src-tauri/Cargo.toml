@@ -21,6 +21,12 @@ tauri-build = { version = "2.0.0", features = [] }
 serde_json = "1.0"
 
 
+[features]
+# 生产构建开关：缺少 custom-protocol 时 tauri 会走 dev 分支，
+# 前端改从 devUrl(http://localhost:1420) 加载，释放产物会变成一个"空白透明窗口"。
+# 发布必须带 --features custom-protocol（tauri CLI 会自动传入）。
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 openrevo-core = { path = "crates/openrevo-core" }
 tauri = { version = "2.0.0", features = ["tray-icon"] }
