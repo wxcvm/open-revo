@@ -207,6 +207,45 @@ pub fn ensure_service() -> bool {
     }
 }
 
+
+/// Vendor default curves (UserFanTables/DefaultFanTable_*.json -> Duty arrays).
+pub const PRESET_OFFICE: [u8; 16] = [0, 30, 30, 35, 45, 45, 50, 55, 55, 55, 55, 55, 55, 55, 55, 55];
+pub const PRESET_GAMING: [u8; 16] = [0, 30, 30, 35, 45, 45, 50, 55, 70, 80, 90, 90, 90, 90, 90, 90];
+pub const PRESET_TURBO: [u8; 16] = [0, 30, 30, 35, 45, 45, 50, 55, 70, 80, 100, 100, 100, 100, 100, 100];
+
+fn publish(topic: &str, payload: &str, wait_ms: u64) -> Result<Vec<BusMessage>, String> {
+    command(topic, payload, Duration::from_millis(wait_ms))
+}
+
+/// Switch to the custom operating mode first (the vendor only accepts a written
+/// curve while the machine sits in custom mode), then push CPU and GPU curves.
+pub fn apply_fan_preset(preset: &str) -> Result<Vec<BusMessage>, String> {
+    let (label, duty) = match preset.to_ascii_lowercase().as_str() {
+        "office" => ("OpenRevo Office", PRESET_OFFICE),
+        "gaming" => ("OpenRevo Gaming", PRESET_GAMING),
+        "turbo" => ("OpenRevo Turbo", PRESET_TURBO),
+        _ => return restore_fan_curve(),
+    };
+
+    let mut messages = publish("Fan/Control", "{\"Action\":\"OPERATING_CUSTOM_MODE\"}", 1200)?;
+    messages.extend(set_fan_table(label, "CPU", &duty)?);
+    // GPU table is accepted even without a discrete GPU; keep both in sync.
+    let _ = set_fan_table(label, "GPU", &duty);
+    messages.extend(probe().unwrap_or_default());
+    Ok(messages)
+}
+
+/// Hand control back to the vendor firmware (drops the custom table).
+pub fn restore_fan_curve() -> Result<Vec<BusMessage>, String> {
+    let mut messages = publish(
+        "Fan/Control",
+        "{\"Action\":\"RESTORE_FAN_SPEED_CURVE_SETTING_ALL\"}",
+        1200,
+    )?;
+    messages.extend(probe().unwrap_or_default());
+    Ok(messages)
+}
+
 pub fn probe() -> Result<Vec<BusMessage>, String> {
     let mut result = command("Fan/Control", "{\"Action\":\"GETSTATUS\"}", Duration::from_millis(900))?;
     if result.is_empty() {

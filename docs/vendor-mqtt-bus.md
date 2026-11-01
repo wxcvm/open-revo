@@ -77,3 +77,20 @@ Start-Service GCUBridge      # 需要管理员
 ```
 
 启动后 open-revo 的「系统监控 → 风扇转速」卡片会显示 `厂商通道 在线 · localhost:13688` 并出现「强冷」开关。
+
+## 7. 未打通：自定义风扇表（2026-11-01 实测）
+
+按官方 UI 的写法发送，**表能发出去但不会激活**：
+
+```
+GETSTATUS                       -> OperatingMode 1
+OPERATING_CUSTOM_MODE           -> OperatingMode 仍为 1（模式未切换）
+SET_FAN_SPEED_CURVE_SETTING
+  Name=M1T1 / DefaultFanTable_Office, Type=CPU, T0..T15
+                                -> Fan/Table 仍为 Name=null, Activated=false
+RESTORE_FAN_SPEED_CURVE_SETTING_ALL
+```
+
+结论：这台机型上「切自定义模式 + 写曲线」被服务端校验拦掉了（可能要求官方 UI 会话、机型白名单或走 `Setting/Control` 的另一条链路），
+所以 open-revo 目前只对外暴露已验证可用的 `FAN_BOOST_ON/OFF`（强冷）。
+`vendor_bus::apply_fan_preset` 保留在代码里但未接到界面，等把服务端校验摸清再启用。
