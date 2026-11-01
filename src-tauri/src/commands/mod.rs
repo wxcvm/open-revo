@@ -16,6 +16,7 @@ pub mod shortcut_cmd;
 pub mod raw_ec_cmd;
 pub mod watcher_cmd;
 pub mod sysinfo_cmd;
+pub mod vendor_cmd;
 
 pub use cooler_cmd::*;
 pub use display_cmd::*;
@@ -30,3 +31,4 @@ pub use shortcut_cmd::*;
 pub use raw_ec_cmd::*;
 pub use watcher_cmd::*;
 pub use sysinfo_cmd::*;
+pub use vendor_cmd::*;

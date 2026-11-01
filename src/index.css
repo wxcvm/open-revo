@@ -3387,6 +3387,10 @@ body,
   color: var(--text-secondary);
 }
 
+.mon-plain-value.is-ok {
+  color: var(--status-ok);
+}
+
 .mon-plain-value.is-warn {
   color: var(--status-warn);
 }

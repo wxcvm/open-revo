@@ -62,6 +62,66 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     };
   }, []);
 
+  const [vendorOnline, setVendorOnline] = useState(false);
+  const [vendorBoost, setVendorBoost] = useState<boolean | null>(null);
+  const [vendorBusy, setVendorBusy] = useState(false);
+
+  const startVendorService = async () => {
+    try {
+      await invoke<boolean>('vendor_ensure_service');
+    } catch {
+      /* service start is best effort */
+    }
+  };
+
+  const refreshVendorBus = async (): Promise<boolean> => {
+    try {
+      const messages = await invoke<{ topic: string; payload: string }[]>('vendor_bus_probe');
+      setVendorOnline(true);
+      const statusMessage = messages.find((item) => item.topic === 'Fan/Status');
+      if (statusMessage) {
+        try {
+          const parsed = JSON.parse(statusMessage.payload) as { FanBoostEnable?: string };
+          setVendorBoost(parsed.FanBoostEnable === '1');
+        } catch {
+          setVendorBoost(null);
+        }
+      }
+      return true;
+    } catch {
+      setVendorOnline(false);
+      setVendorBoost(null);
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    void (async () => {
+      // 首次离线时尝试拉起厂商服务（open-revo 本身已是管理员权限）
+      if (!(await refreshVendorBus())) {
+        await startVendorService();
+        await refreshVendorBus();
+      }
+    })();
+    const timer = window.setInterval(() => {
+      void refreshVendorBus();
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const toggleVendorBoost = async () => {
+    if (vendorBusy) return;
+    setVendorBusy(true);
+    try {
+      await invoke('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
+      await refreshVendorBus();
+    } catch {
+      setVendorOnline(false);
+    } finally {
+      setVendorBusy(false);
+    }
+  };
+
   const cpuUsage = clampPct(status.cpu_usage ?? 0);
   const cpuFreq = status.cpu_freq ?? 0;
   const cpuBase = status.cpu_base_mhz && status.cpu_base_mhz > 0 ? status.cpu_base_mhz : 0;
@@ -302,11 +362,34 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           </div>
 
           <div className="mon-plain">
-            <span className="mon-plain-label">转速调节</span>
-            <span className="mon-plain-value">
-              {fanControllable ? '本机型可调（电源管理 → 风扇曲线）' : 'EC 自动（本机型未接入调速协议）'}
+            <span className="mon-plain-label">厂商通道</span>
+            <span className={vendorOnline ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
+              {vendorOnline ? '在线 · localhost:13688' : '离线（GCUBridge 未运行）'}
             </span>
           </div>
+
+          {vendorOnline && (
+            <div className="mon-plain">
+              <span className="mon-plain-label">强冷</span>
+              <button
+                type="button"
+                className={`toggle-btn ${vendorBoost ? 'active-emerald' : ''}`}
+                onClick={toggleVendorBoost}
+                disabled={vendorBusy}
+              >
+                {vendorBoost ? '已开启' : '已关闭'}
+              </button>
+            </div>
+          )}
+
+          {!vendorOnline && (
+            <div className="mon-plain">
+              <span className="mon-plain-label">转速调节</span>
+              <span className="mon-plain-value">
+                {fanControllable ? '本机型可调（电源管理 → 风扇曲线）' : 'EC 自动（未接入调速协议）'}
+              </span>
+            </div>
+          )}
         </section>
       </div>
 
