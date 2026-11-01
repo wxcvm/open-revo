@@ -150,6 +150,10 @@ export default function App() {
         if (state.present && state.running && state.auto_start) {
           setVendorBusActive(true);
         }
+        if (state.present && state.running) {
+          // 启动时预热一次总线探测：既能让“接管提示”尽早收敛，也把失败原因写进 vendor-diag.log
+          void invoke('vendor_bus_probe').catch(() => undefined);
+        }
       })
       .catch(() => undefined);
   }, [isBldPreview]);

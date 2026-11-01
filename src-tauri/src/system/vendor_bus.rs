@@ -1,7 +1,10 @@
 // OpenRevo - Vendor MQTT Control Bus (AiStone)
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 const BROKER_HOST: &str = "127.0.0.1";
 const BROKER_PORT: u16 = 13688;
@@ -133,19 +136,14 @@ fn parse_publish(body: &[u8]) -> Option<BusMessage> {
     })
 }
 
-fn open() -> Result<TcpStream, String> {
-    let addr = broker_addr()?;
-    let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-        .map_err(|_| "vendor bus offline".to_string())?;
-    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
-    stream.set_nodelay(true).ok();
-    stream
-        .write_all(&connect_packet())
-        .map_err(|e| format!("connect write failed: {e}"))?;
-    match next_packet(&mut stream) {
-        Some((0x20, body)) if body.len() >= 2 && body[1] == 0 => Ok(stream),
-        Some((0x20, body)) => Err(format!("broker refused connection: {:?}", body.get(1))),
-        _ => Err("no CONNACK from vendor bus".to_string()),
+fn wait_suback(stream: &mut TcpStream, budget: Duration) {
+    let deadline = Instant::now() + budget;
+    while Instant::now() < deadline {
+        match next_packet(stream) {
+            Some((0x90, _)) => return,
+            Some(_) => {}
+            None => return,
+        }
     }
 }
 
@@ -188,44 +186,79 @@ fn drain(stream: &mut TcpStream, budget: Duration, min_replies: usize) -> Vec<Bu
     }
     messages
 }
+struct BusClient {
+    stream: TcpStream,
+}
 
-fn wait_suback(stream: &mut TcpStream, budget: Duration) {
-    let deadline = Instant::now() + budget;
-    while Instant::now() < deadline {
-        match next_packet(stream) {
-            Some((0x90, _)) => return,
-            Some(_) => {}
-            None => return,
+fn connect_client() -> Result<BusClient, String> {
+    let addr = broker_addr()?;
+    let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+        .map_err(|_| "vendor bus offline".to_string())?;
+    stream.set_read_timeout(Some(READ_TIMEOUT)).ok();
+    stream.set_nodelay(true).ok();
+    stream
+        .write_all(&connect_packet())
+        .map_err(|e| format!("connect write failed: {e}"))?;
+    match next_packet(&mut stream) {
+        Some((0x20, body)) if body.len() >= 2 && body[1] == 0 => {}
+        Some((0x20, body)) => return Err(format!("broker refused connection: {:?}", body.get(1))),
+        _ => return Err("no CONNACK from vendor bus".to_string()),
+    }
+    stream.write_all(&subscribe_packet()).ok();
+    wait_suback(&mut stream, SUBACK_WAIT);
+    Ok(BusClient { stream })
+}
+
+/// 单连接长驻：厂商服务对“频繁建连/断连”很敏感（会直接 CLR 崩溃），
+/// 所以这里复用一条连接，出错才重连。
+fn with_client<T>(work: impl FnOnce(&mut BusClient) -> Result<T, String>) -> Result<T, String> {
+    static CLIENT: OnceLock<Mutex<Option<BusClient>>> = OnceLock::new();
+    let mut guard = CLIENT.get_or_init(|| Mutex::new(None)).lock();
+    if guard.is_none() {
+        *guard = Some(connect_client()?);
+    }
+    let client = match guard.as_mut() {
+        Some(client) => client,
+        None => return Err("vendor bus offline".to_string()),
+    };
+    match work(client) {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            *guard = None;
+            Err(error)
         }
     }
 }
 
+fn publish_then_drain(client: &mut BusClient, request: (&str, &str), budget: Duration, min_replies: usize) -> Result<Vec<BusMessage>, String> {
+    client
+        .stream
+        .write_all(&publish_packet(request.0, request.1))
+        .map_err(|e| format!("publish failed: {e}"))?;
+    Ok(drain(&mut client.stream, budget, min_replies))
+}
+
 pub fn command(topic: &str, payload: &str, budget: Duration) -> Result<Vec<BusMessage>, String> {
-    let started = Instant::now();
-    let mut stream = open()?;
-    stream.write_all(&subscribe_packet()).ok();
-    wait_suback(&mut stream, SUBACK_WAIT.min(budget));
-    stream.write_all(&publish_packet(topic, payload)).ok();
-    let remaining = budget.saturating_sub(started.elapsed());
-    Ok(drain(&mut stream, remaining, 1))
+    with_client(|client| publish_then_drain(client, (topic, payload), budget, 1))
 }
 
 pub fn batch(requests: &[(&str, &str)], budget: Duration) -> Result<Vec<BusMessage>, String> {
     let started = Instant::now();
-    let mut stream = open()?;
-    stream.write_all(&subscribe_packet()).ok();
-    wait_suback(&mut stream, SUBACK_WAIT.min(budget));
-    for (topic, payload) in requests {
-        stream.write_all(&publish_packet(topic, payload)).ok();
-    }
-    let remaining = budget.saturating_sub(started.elapsed());
-    Ok(drain(&mut stream, remaining, requests.len()))
+    with_client(|client| {
+        for request in requests {
+            client
+                .stream
+                .write_all(&publish_packet(request.0, request.1))
+                .map_err(|e| format!("publish failed: {e}"))?;
+        }
+        let remaining = budget.saturating_sub(started.elapsed());
+        Ok(drain(&mut client.stream, remaining, requests.len()))
+    })
 }
 
 pub fn is_available() -> bool {
-    open().is_ok()
+    connect_client().is_ok()
 }
-
 pub fn probe() -> Result<Vec<BusMessage>, String> {
     batch(
         &[

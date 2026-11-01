@@ -186,7 +186,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
       }
       if (stopped) return;
       // 在线 6 s 一轮，离线退避到 30 s，避免空转与无谓的服务调用
-      timer = window.setTimeout(tick, vendorOnlineRef.current ? 6000 : 30000);
+      timer = window.setTimeout(tick, vendorOnlineRef.current ? 15000 : 30000);
     };
     void (async () => {
       if (vendorPersist) {

@@ -127,20 +127,20 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   const refreshKbBusWithRetry = async (attempts = 3) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const online = await refreshKbBus().then(() => kbBusRef.current.online).catch(() => false);
+      const online = await refreshKbBus();
       if (online) return true;
       await new Promise((resolve) => window.setTimeout(resolve, 600));
     }
     return false;
   };
 
-  const refreshKbBus = async () => {
+  const refreshKbBus = async (): Promise<boolean> => {
     try {
       const res = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_bus_probe');
       const status = res.messages.find((message) => message.topic === 'Setting/Status');
       if (!status) {
         setKbBus((prev) => ({ ...prev, online: false }));
-        return;
+        return false;
       }
       const parsed = JSON.parse(status.payload) as { CloseTimer?: number | string; SingleColorKBBL?: string };
       setKbBus({
@@ -148,8 +148,11 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         timerSec: Number(parsed.CloseTimer ?? 0),
         backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF',
       });
-    } catch {
+      return true;
+    } catch (error) {
+      console.error('vendor bus probe failed:', error);
       setKbBus((prev) => ({ ...prev, online: false }));
+      return false;
     }
   };
 
@@ -162,7 +165,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
       if (document.visibilityState === 'visible') {
         void refreshKbBus();
       }
-    }, 15000);
+    }, 30000);
     return () => window.clearInterval(timer);
   }, []);
 

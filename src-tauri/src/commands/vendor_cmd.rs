@@ -44,6 +44,16 @@ where
         let started = Instant::now();
         let result = work();
         LAST_LATENCY_MS.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        if let Err(error) = &result {
+            // 现场排错：把失败原因落到 APPDATA，便于不打扰用户地定位
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                use std::io::Write as _;
+                let path = std::path::Path::new(&appdata).join("OpenRevo").join("vendor-diag.log");
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    let _ = writeln!(file, "[{:?}] {} ms: {}", std::time::SystemTime::now(), started.elapsed().as_millis(), error);
+                }
+            }
+        }
         result.map(|messages| VendorResponse {
             messages: to_messages(messages),
             elapsed_ms: started.elapsed().as_millis() as u64,
