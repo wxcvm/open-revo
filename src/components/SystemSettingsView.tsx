@@ -155,6 +155,19 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     }
   };
 
+  const connectKbBus = async () => {
+    if (kbBusBusy) return;
+    setKbBusBusy(true);
+    try {
+      await invoke<boolean>('vendor_ensure_service');
+      await refreshKbBus();
+    } catch (error) {
+      console.error('Failed to start vendor service:', error);
+    } finally {
+      setKbBusBusy(false);
+    }
+  };
+
   const applyKbBacklight = async (on: boolean) => {
     if (kbBusBusy) return;
     setKbBusBusy(true);
@@ -550,6 +563,23 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               </>
             ) : (
               <>
+                <div className="quick-row" style={{ alignItems: 'center' }}>
+                  <div>
+                    <div className="sys-row-label">
+                      <span>分钟级控制</span>
+                      <RevBadge variant="warning">未连接</RevBadge>
+                    </div>
+                    <div className="sys-row-desc">
+                      启动官方后台服务后即可获得「永不 / 1 / 5 / 10 / 15 / 30 / 60 分钟」与背光开关
+                    </div>
+                  </div>
+                  <div className="sys-row-controls">
+                    <button type="button" className="toggle-btn" disabled={kbBusBusy} onClick={connectKbBus}>
+                      {kbBusBusy ? '连接中…' : '连接厂商通道'}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="quick-row" style={{ alignItems: 'center' }}>
                   <div>
                     <div className="sys-row-label">
