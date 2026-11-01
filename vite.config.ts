@@ -12,7 +12,14 @@ const getGitCommitHash = (): string => {
 };
 
 const gitHash = getGitCommitHash();
-const appVersion = gitHash ? `${pkg.version}-${gitHash}` : pkg.version;
+const getBuildStamp = (): string => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+};
+
+const buildStamp = getBuildStamp();
+const appVersion = `${pkg.version}-${gitHash || 'nogit'}-${buildStamp}`;
 
 export default defineConfig({
   plugins: [react()],
