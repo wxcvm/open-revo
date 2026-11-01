@@ -4,7 +4,9 @@
 // Windows "GPU Engine" performance counters (english counter paths, locale independent)
 // so any WDDM adapter reports a real utilisation figure.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+
+use parking_lot::Mutex;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
