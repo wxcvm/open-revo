@@ -77,6 +77,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const [vendorBoost, setVendorBoost] = useState<boolean | null>(null);
   const [vendorBusy, setVendorBusy] = useState(false);
   const [vendorLatency, setVendorLatency] = useState<number | null>(null);
+  const [vendorStackPresent, setVendorStackPresent] = useState(true);
   const [vendorPersist, setVendorPersist] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem('openrevo.vendorBusPersist') === '1';
@@ -102,6 +103,12 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     setVendorOnline(true);
     setVendorBusActive(true);
   };
+
+  useEffect(() => {
+    void invoke<boolean>('vendor_stack_present')
+      .then((present) => setVendorStackPresent(present))
+      .catch(() => setVendorStackPresent(true));
+  }, []);
 
   const refreshVendorBus = async (): Promise<boolean> => {
     if (vendorPending.current) return vendorOnlineRef.current;
@@ -443,7 +450,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
             <span className={vendorOnline ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
               {vendorOnline
                 ? `在线 · localhost:13688 · ${vendorLatency ?? '--'} ms`
-                : '离线（GCUBridge 未运行）'}
+                : vendorStackPresent
+                  ? '离线（GCUBridge 未运行）'
+                  : '官方控制中心已卸载'}
             </span>
           </div>
 
@@ -464,23 +473,31 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           {!vendorOnline && (
             <div className="mon-plain">
               <span className="mon-plain-label">连接</span>
-              <button
-                type="button"
-                className="toggle-btn"
-                onClick={connectVendorService}
-                disabled={vendorBusy}
-              >
-                {vendorBusy ? '启动中…' : '连接厂商通道'}
-              </button>
-              <button
-                type="button"
-                className={'toggle-btn ' + (vendorPersist ? 'active-emerald' : '')}
-                onClick={() => setVendorPersistMode(!vendorPersist)}
-                disabled={vendorBusy}
-                title="让 GCUBridge 随系统自动启动，厂商通道不再被回收"
-              >
-                {vendorPersist ? '常开已启用' : '常开'}
-              </button>
+              {vendorStackPresent ? (
+                <>
+                  <button
+                    type="button"
+                    className="toggle-btn"
+                    onClick={connectVendorService}
+                    disabled={vendorBusy}
+                  >
+                    {vendorBusy ? '启动中…' : '连接厂商通道'}
+                  </button>
+                  <button
+                    type="button"
+                    className={'toggle-btn ' + (vendorPersist ? 'active-emerald' : '')}
+                    onClick={() => setVendorPersistMode(!vendorPersist)}
+                    disabled={vendorBusy}
+                    title="让 GCUBridge 随系统自动启动，厂商通道不再被回收"
+                  >
+                    {vendorPersist ? '常开已启用' : '常开'}
+                  </button>
+                </>
+              ) : (
+                <span style={{ fontSize: '11px', color: 'var(--status-warn)' }}>
+                  未安装
+                </span>
+              )}
             </div>
           )}
 

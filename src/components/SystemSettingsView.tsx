@@ -116,6 +116,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     backlight: true,
   });
   const [kbBusBusy, setKbBusBusy] = useState(false);
+  const [kbStackPresent, setKbStackPresent] = useState(true);
 
   const formatKbTimer = (sec: number): string => (sec <= 0 ? '永不关闭' : Math.round(sec / 60) + ' 分钟');
 
@@ -139,6 +140,9 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   };
 
   useEffect(() => {
+    void invoke<boolean>('vendor_stack_present')
+      .then((present) => setKbStackPresent(present))
+      .catch(() => setKbStackPresent(true));
     void refreshKbBus();
   }, []);
 
@@ -567,17 +571,23 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                 <div className="quick-row" style={{ alignItems: 'center' }}>
                   <div>
                     <div className="sys-row-label">
-                      <span>分钟级控制</span>
-                      <RevBadge variant="warning">未连接</RevBadge>
+                      <span>{kbStackPresent ? '分钟级控制' : '分钟级控制（不可用）'}</span>
+                      <RevBadge variant="warning">{kbStackPresent ? '未连接' : '已卸载'}</RevBadge>
                     </div>
                     <div className="sys-row-desc">
-                      启动官方后台服务后即可获得「永不 / 1 / 5 / 10 / 15 / 30 / 60 分钟」与背光开关
+                      {kbStackPresent
+                        ? '启动官方后台服务后即可获得「永不 / 1 / 5 / 10 / 15 / 30 / 60 分钟」与背光开关'
+                        : '机械革命控制中心已卸载，后台服务与 MQTT 总线都不在了；重装官方控制中心后此功能自动恢复'}
                     </div>
                   </div>
                   <div className="sys-row-controls">
-                    <button type="button" className="toggle-btn" disabled={kbBusBusy} onClick={connectKbBus}>
-                      {kbBusBusy ? '连接中…' : '连接并常开'}
-                    </button>
+                    {kbStackPresent ? (
+                      <button type="button" className="toggle-btn" disabled={kbBusBusy} onClick={connectKbBus}>
+                        {kbBusBusy ? '连接中…' : '连接并常开'}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>需要重装官方控制中心</span>
+                    )}
                   </div>
                 </div>
 

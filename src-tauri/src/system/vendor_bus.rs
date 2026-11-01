@@ -312,6 +312,15 @@ pub fn restore_fan_curve() -> Result<Vec<BusMessage>, String> {
     )
 }
 
+/// Whether the vendor control-center binaries are still installed.
+/// After an uninstall the service and broker are gone, so no bus can ever come up.
+pub fn vendor_stack_present() -> bool {
+    std::path::Path::new(
+        r"C:\Program Files\OEM\机械革命控制中心\AiStoneService\MyControlCenter\GCUService.exe",
+    )
+    .exists()
+}
+
 /// Switch the vendor service between Automatic and Manual so the bus stops flapping.
 pub fn set_service_persistent(enabled: bool) -> bool {
     #[cfg(windows)]

@@ -139,3 +139,8 @@ pub async fn vendor_set_kb_timer(seconds: u32) -> Result<VendorResponse, String>
 pub async fn vendor_set_kb_backlight(enabled: bool) -> Result<VendorResponse, String> {
     run_blocking(move || vendor_bus::set_kb_backlight(enabled)).await
 }
+
+#[tauri::command]
+pub fn vendor_stack_present() -> bool {
+    vendor_bus::vendor_stack_present()
+}

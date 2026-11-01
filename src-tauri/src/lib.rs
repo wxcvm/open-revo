@@ -166,6 +166,7 @@ pub fn run() {
             commands::hardware_cmd::get_model_capabilities,
             commands::hardware_cmd::get_hardware_status,
             commands::sysinfo_cmd::get_system_stats,
+            commands::vendor_cmd::vendor_stack_present,
             commands::vendor_cmd::vendor_ensure_service,
             commands::vendor_cmd::vendor_is_available,
             commands::vendor_cmd::vendor_bus_probe,
