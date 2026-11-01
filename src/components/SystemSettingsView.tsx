@@ -101,6 +101,73 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     }
   };
 
+  const KB_TIMER_PRESETS = [
+    { sec: 0, label: '永不' },
+    { sec: 60, label: '1 分钟' },
+    { sec: 300, label: '5 分钟' },
+    { sec: 600, label: '10 分钟' },
+    { sec: 900, label: '15 分钟' },
+    { sec: 1800, label: '30 分钟' },
+    { sec: 3600, label: '60 分钟' },
+  ];
+  const [kbBus, setKbBus] = useState<{ online: boolean; timerSec: number; backlight: boolean }>({
+    online: false,
+    timerSec: 600,
+    backlight: true,
+  });
+  const [kbBusBusy, setKbBusBusy] = useState(false);
+
+  const formatKbTimer = (sec: number): string => (sec <= 0 ? '永不关闭' : Math.round(sec / 60) + ' 分钟');
+
+  const refreshKbBus = async () => {
+    try {
+      const res = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_bus_probe');
+      const status = res.messages.find((message) => message.topic === 'Setting/Status');
+      if (!status) {
+        setKbBus((prev) => ({ ...prev, online: false }));
+        return;
+      }
+      const parsed = JSON.parse(status.payload) as { CloseTimer?: number | string; SingleColorKBBL?: string };
+      setKbBus({
+        online: true,
+        timerSec: Number(parsed.CloseTimer ?? 0),
+        backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF',
+      });
+    } catch {
+      setKbBus((prev) => ({ ...prev, online: false }));
+    }
+  };
+
+  useEffect(() => {
+    void refreshKbBus();
+  }, []);
+
+  const applyKbTimer = async (sec: number) => {
+    if (kbBusBusy) return;
+    setKbBusBusy(true);
+    try {
+      await invoke('vendor_set_kb_timer', { seconds: sec });
+      await refreshKbBus();
+    } catch (error) {
+      console.error('Failed to set keyboard timer:', error);
+    } finally {
+      setKbBusBusy(false);
+    }
+  };
+
+  const applyKbBacklight = async (on: boolean) => {
+    if (kbBusBusy) return;
+    setKbBusBusy(true);
+    try {
+      await invoke('vendor_set_kb_backlight', { enabled: on });
+      await refreshKbBus();
+    } catch (error) {
+      console.error('Failed to toggle keyboard backlight:', error);
+    } finally {
+      setKbBusBusy(false);
+    }
+  };
+
   const [logStatus, setLogStatus] = useState<{
     visible: boolean;
     enabled: boolean;
@@ -430,6 +497,99 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   return (
     <div className="sys-page">
+      {(kbBus.online || kbSleepSupported) && (
+        <div className="glass-card">
+          <h3 className="sys-section-title">键盘背光</h3>
+          <div className="sys-rows">
+            {kbBus.online ? (
+              <>
+                <div className="quick-row" style={{ alignItems: 'center' }}>
+                  <div>
+                    <div className="sys-row-label">
+                      <span>键盘背光开关</span>
+                      <RevBadge variant="success">厂商总线</RevBadge>
+                    </div>
+                    <div className="sys-row-desc">通过官方服务下发，与机械革命控制中心的开关等价</div>
+                  </div>
+                  <div className="sys-row-controls">
+                    <button
+                      type="button"
+                      className={'toggle-btn ' + (kbBus.backlight ? 'active-emerald' : '')}
+                      disabled={kbBusBusy}
+                      onClick={() => applyKbBacklight(!kbBus.backlight)}
+                    >
+                      {kbBus.backlight ? '已开启' : '已关闭'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="quick-row" style={{ alignItems: 'center' }}>
+                  <div>
+                    <div className="sys-row-label">
+                      <span>灯效睡眠时间</span>
+                      <RevBadge variant="info">CloseTimer</RevBadge>
+                    </div>
+                    <div className="sys-row-desc">
+                      无人操作后自动关闭背光；当前 {formatKbTimer(kbBus.timerSec)}（官方按分钟显示，底层按秒存储）
+                    </div>
+                  </div>
+                  <div className="sys-row-controls">
+                    {KB_TIMER_PRESETS.map((preset) => (
+                      <button
+                        key={preset.sec}
+                        type="button"
+                        className={'toggle-btn ' + (kbBus.timerSec === preset.sec ? 'active-indigo' : '')}
+                        disabled={kbBusBusy}
+                        onClick={() => applyKbTimer(preset.sec)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="quick-row" style={{ alignItems: 'center' }}>
+                  <div>
+                    <div className="sys-row-label">
+                      <span>背光休眠延时</span>
+                      <RevBadge variant="info">EC</RevBadge>
+                    </div>
+                    <div className="sys-row-desc">厂商总线未连接时的降级通道：本机型 EC 只区分「常亮」与「自动熄灭」两态</div>
+                  </div>
+                  <div className="sys-row-controls">
+                    {kbTimeoutOptions.map((seconds) => (
+                      <button
+                        key={seconds}
+                        type="button"
+                        className={'toggle-btn ' + (kbTimeout === seconds ? 'active-indigo' : '')}
+                        disabled={kbTimeoutBusy}
+                        onClick={() => applyKbTimeout(seconds)}
+                      >
+                        {seconds === 0 ? '常亮' : seconds + 's'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="quick-row" style={{ alignItems: 'center' }}>
+                  <div>
+                    <div className="sys-row-label">
+                      <span>背光亮度</span>
+                      <RevBadge variant="info">硬件</RevBadge>
+                    </div>
+                    <div className="sys-row-desc">由键盘固件与 Fn 快捷键控制；接上厂商通道后可获得开关与分钟级延时</div>
+                  </div>
+                  <div className="sys-row-controls">
+                    <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Fn + F6 / F7</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {kbSleepSupported && (
         <div className="glass-card">
           <h3 className="sys-section-title">键盘背光</h3>

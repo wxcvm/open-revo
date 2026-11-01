@@ -73,6 +73,13 @@ pub async fn vendor_ensure_service() -> bool {
 }
 
 #[tauri::command]
+pub async fn vendor_set_service_persistent(enabled: bool) -> bool {
+    tauri::async_runtime::spawn_blocking(move || vendor_bus::set_service_persistent(enabled))
+        .await
+        .unwrap_or(false)
+}
+
+#[tauri::command]
 pub fn vendor_last_latency_ms() -> u64 {
     LAST_LATENCY_MS.load(Ordering::Relaxed)
 }
@@ -118,4 +125,17 @@ pub async fn vendor_set_fan_table(
 #[tauri::command]
 pub async fn vendor_apply_fan_preset(preset: String) -> Result<VendorResponse, String> {
     run_blocking(move || vendor_bus::apply_fan_preset(&preset)).await
+}
+
+#[tauri::command]
+pub async fn vendor_set_kb_timer(seconds: u32) -> Result<VendorResponse, String> {
+    if seconds > 86_400 {
+        return Err("seconds must be <= 86400".to_string());
+    }
+    run_blocking(move || vendor_bus::set_kb_timer(seconds)).await
+}
+
+#[tauri::command]
+pub async fn vendor_set_kb_backlight(enabled: bool) -> Result<VendorResponse, String> {
+    run_blocking(move || vendor_bus::set_kb_backlight(enabled)).await
 }

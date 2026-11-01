@@ -228,9 +228,29 @@ pub fn probe() -> Result<Vec<BusMessage>, String> {
         &[
             ("Fan/Control", "{\"Action\":\"GETSTATUS\"}"),
             ("Fan/Control", "{\"Action\":\"GET_FAN_SPEED_CURVE_SETTING\"}"),
+            ("Setting/Control", "{\"Action\":\"GETSTATUS\"}"),
         ],
         PROBE_BUDGET,
     )
+}
+
+
+/// Keyboard backlight auto-off timer. Zero disables it (never auto-off).
+/// The vendor field is named "Mins" but the service stores seconds (600 = 10 min).
+pub fn set_kb_timer(seconds: u32) -> Result<Vec<BusMessage>, String> {
+    let payload = if seconds == 0 {
+        r#"{"Action":"KEYBOARD_LIGHTBAR_TIMER_OFF"}"#.to_string()
+    } else {
+        format!(r#"{{"Action":"KEYBOARD_LIGHTBAR_TIMER_ON","Mins":{seconds}}}"#)
+    };
+    command("Setting/Control", &payload, REQUEST_BUDGET)
+}
+
+/// Single-colour keyboard backlight on/off switch.
+pub fn set_kb_backlight(enabled: bool) -> Result<Vec<BusMessage>, String> {
+    let action = if enabled { "SINGLE_COLOR_KBBL_STATUS_ON" } else { "SINGLE_COLOR_KBBL_STATUS_OFF" };
+    let payload = format!(r#"{{"Action":"{action}"}}"#);
+    command("Setting/Control", &payload, REQUEST_BUDGET)
 }
 
 pub fn set_fan_boost(enabled: bool) -> Result<Vec<BusMessage>, String> {
@@ -290,6 +310,25 @@ pub fn restore_fan_curve() -> Result<Vec<BusMessage>, String> {
         "{\"Action\":\"RESTORE_FAN_SPEED_CURVE_SETTING_ALL\"}",
         REQUEST_BUDGET,
     )
+}
+
+/// Switch the vendor service between Automatic and Manual so the bus stops flapping.
+pub fn set_service_persistent(enabled: bool) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mode = if enabled { "auto" } else { "demand" };
+        let status = std::process::Command::new("sc.exe")
+            .args(["config", "GCUBridge", "start=", mode])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        matches!(status, Ok(code) if code.success())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 pub fn ensure_service() -> bool {
