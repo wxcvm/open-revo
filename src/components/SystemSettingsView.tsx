@@ -58,6 +58,49 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   onPreviewFormFactor,
 }) => {
 
+  const kbSleepSupported = Boolean(capabilities?.rgb_keyboard?.sleep_timeout_supported);
+  const kbTimeoutOptions = capabilities?.rgb_keyboard?.timeout_options_seconds ?? [0, 10, 30, 60];
+  const [kbTimeout, setKbTimeout] = useState<number>(0);
+  const [kbTimeoutBusy, setKbTimeoutBusy] = useState(false);
+
+  useEffect(() => {
+    if (!kbSleepSupported) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    invoke<number>('get_keyboard_sleep_timeout')
+      .then((value) => {
+        if (!disposed) setKbTimeout(typeof value === 'number' ? value : 0);
+      })
+      .catch(() => {
+        if (!disposed) setKbTimeout(0);
+      });
+    listen<number>('keyboard-sleep-timeout-changed', (event) => {
+      if (!disposed) setKbTimeout(event.payload);
+    })
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [kbSleepSupported]);
+
+  const applyKbTimeout = async (seconds: number) => {
+    if (kbTimeoutBusy) return;
+    setKbTimeoutBusy(true);
+    try {
+      await invoke('set_keyboard_sleep_timeout', { seconds });
+      setKbTimeout(seconds);
+    } catch (error) {
+      console.error('Failed to set keyboard sleep timeout:', error);
+    } finally {
+      setKbTimeoutBusy(false);
+    }
+  };
+
   const [logStatus, setLogStatus] = useState<{
     visible: boolean;
     enabled: boolean;
@@ -387,6 +430,53 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   return (
     <div className="sys-page">
+      {kbSleepSupported && (
+        <div className="glass-card">
+          <h3 className="sys-section-title">键盘背光</h3>
+          <div className="sys-rows">
+            <div className="quick-row" style={{ alignItems: 'center' }}>
+              <div>
+                <div className="sys-row-label">
+                  <span>背光休眠延时</span>
+                  <RevBadge variant="info">EC</RevBadge>
+                </div>
+                <div className="sys-row-desc">
+                  无人操作后自动熄灭背光；本机型 EC 只区分「常亮」与「自动熄灭」两态，15/30/60 s 与 10 s 等效
+                </div>
+              </div>
+              <div className="sys-row-controls">
+                {kbTimeoutOptions.map((seconds) => (
+                  <button
+                    key={seconds}
+                    type="button"
+                    className={`toggle-btn ${kbTimeout === seconds ? 'active-indigo' : ''}`}
+                    disabled={kbTimeoutBusy}
+                    onClick={() => applyKbTimeout(seconds)}
+                  >
+                    {seconds === 0 ? '常亮' : `${seconds}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="quick-row" style={{ alignItems: 'center' }}>
+              <div>
+                <div className="sys-row-label">
+                  <span>背光亮度</span>
+                  <RevBadge variant="info">硬件</RevBadge>
+                </div>
+                <div className="sys-row-desc">
+                  本机型背光由键盘固件与 Fn 快捷键控制，未暴露软件亮度通道（WMI 与厂商 MQTT 均无亮度应答）
+                </div>
+              </div>
+              <div className="sys-row-controls">
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Fn + F6 / F7</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="glass-card">
         <h3 className="sys-section-title">系统功能开关</h3>
         <div className="sys-rows">

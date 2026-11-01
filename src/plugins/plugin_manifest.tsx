@@ -43,6 +43,7 @@ export interface ModelCapabilities {
     type?: string;
     steps?: number[];
     sleep_timeout_supported?: boolean;
+    timeout_options_seconds?: number[];
     hardware_autonomous?: boolean;
     hotkey_osd_only?: boolean;
   };
