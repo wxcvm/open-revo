@@ -260,17 +260,29 @@ pub fn is_available() -> bool {
     connect_client().is_ok()
 }
 pub fn probe() -> Result<Vec<BusMessage>, String> {
-    batch(
-        &[
-            ("Fan/Control", "{\"Action\":\"GETSTATUS\"}"),
-            ("Fan/Control", "{\"Action\":\"GET_FAN_SPEED_CURVE_SETTING\"}"),
-            ("Setting/Control", "{\"Action\":\"GETSTATUS\"}"),
-        ],
-        PROBE_BUDGET,
-    )
+    // 逐条发送：厂商 MQTT 服务在一条连接上连收多条命令时会抛
+    // NullReferenceException（MqttServer_ApplicationMessageReceived），把 broker 带崩。
+    let mut result = command(
+        "Fan/Control",
+        "{\"Action\":\"GETSTATUS\"}",
+        Duration::from_millis(500),
+    )?;
+    if let Ok(mut extra) = command(
+        "Fan/Control",
+        "{\"Action\":\"GET_FAN_SPEED_CURVE_SETTING\"}",
+        Duration::from_millis(450),
+    ) {
+        result.append(&mut extra);
+    }
+    if let Ok(mut extra) = command(
+        "Setting/Control",
+        "{\"Action\":\"GETSTATUS\"}",
+        Duration::from_millis(450),
+    ) {
+        result.append(&mut extra);
+    }
+    Ok(result)
 }
-
-
 /// Keyboard backlight auto-off timer. Zero disables it (never auto-off).
 /// The vendor field is named "Mins" but the service stores seconds (600 = 10 min).
 pub fn set_kb_timer(seconds: u32) -> Result<Vec<BusMessage>, String> {
@@ -288,7 +300,6 @@ pub fn set_kb_backlight(enabled: bool) -> Result<Vec<BusMessage>, String> {
     let payload = format!(r#"{{"Action":"{action}"}}"#);
     command("Setting/Control", &payload, REQUEST_BUDGET)
 }
-
 pub fn set_fan_boost(enabled: bool) -> Result<Vec<BusMessage>, String> {
     let action = if enabled { "FAN_BOOST_ON" } else { "FAN_BOOST_OFF" };
     let payload = format!("{{\"Action\":\"{action}\"}}");
