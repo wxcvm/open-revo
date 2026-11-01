@@ -94,3 +94,27 @@ RESTORE_FAN_SPEED_CURVE_SETTING_ALL
 结论：这台机型上「切自定义模式 + 写曲线」被服务端校验拦掉了（可能要求官方 UI 会话、机型白名单或走 `Setting/Control` 的另一条链路），
 所以 open-revo 目前只对外暴露已验证可用的 `FAN_BOOST_ON/OFF`（强冷）。
 `vendor_bus::apply_fan_preset` 保留在代码里但未接到界面，等把服务端校验摸清再启用。
+
+## 8. 时延预算与轮询策略（避免卡死）
+
+| 环节 | 上限 |
+| --- | --- |
+| TCP connect | 300 ms |
+| socket read | 200 ms |
+| 单条命令总预算 | 600 ms |
+| probe（单连接批量取 Fan/Status + Fan/Table） | 700 ms |
+| 收到首个回复后的静默退出 | 150 ms |
+| 服务拉起轮询 | 150 ms × 20（≤3 s，仅用户点击触发） |
+
+前端：单飞守卫（上一次未返回不发第二次）、只在 `document.visibilityState === 'visible'` 时轮询、在线 6 s / 离线 30 s 退避、`vendor_ensure_service` 改为「连接厂商通道」按钮触发。
+
+实测（本机，GCUBridge 运行中）：
+
+```
+is_available  ≈ 210 ms
+probe         ≈ 430 ms（2 条消息）
+fan_boost     ≈ 607 ms
+离线（服务停止）    ≈ 310 ms，直接返回 vendor bus offline
+```
+
+Rust 侧所有命令均为 `async fn` + `spawn_blocking` + 全局串行锁，WebView 主线程不再等待 broker I/O。

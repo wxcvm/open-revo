@@ -1,8 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Activity, Cpu, Fan, Gauge, HardDrive, Zap } from 'lucide-react';
 import { HardwareState, SystemStats } from '../types/hardware';
 import { RevTickBar, MeterTone } from './ui/RevTickBar';
+
+interface VendorMessagePayload {
+  topic: string;
+  payload: string;
+}
+
+interface VendorResponse {
+  messages: VendorMessagePayload[];
+  elapsed_ms: number;
+}
 
 interface SystemMonitorViewProps {
   status: HardwareState;
@@ -65,62 +75,90 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const [vendorOnline, setVendorOnline] = useState(false);
   const [vendorBoost, setVendorBoost] = useState<boolean | null>(null);
   const [vendorBusy, setVendorBusy] = useState(false);
+  const [vendorLatency, setVendorLatency] = useState<number | null>(null);
+  const vendorPending = useRef(false);
+  const vendorOnlineRef = useRef(false);
 
-  const startVendorService = async () => {
-    try {
-      await invoke<boolean>('vendor_ensure_service');
-    } catch {
-      /* service start is best effort */
+  const applyVendorResponse = (response: VendorResponse) => {
+    setVendorLatency(response.elapsed_ms);
+    const statusMessage = response.messages.find((item) => item.topic === 'Fan/Status');
+    if (statusMessage) {
+      try {
+        const parsed = JSON.parse(statusMessage.payload) as { FanBoostEnable?: string };
+        setVendorBoost(parsed.FanBoostEnable === '1');
+      } catch {
+        setVendorBoost(null);
+      }
     }
+    vendorOnlineRef.current = true;
+    setVendorOnline(true);
   };
 
   const refreshVendorBus = async (): Promise<boolean> => {
+    if (vendorPending.current) return vendorOnlineRef.current;
+    vendorPending.current = true;
     try {
-      const messages = await invoke<{ topic: string; payload: string }[]>('vendor_bus_probe');
-      setVendorOnline(true);
-      const statusMessage = messages.find((item) => item.topic === 'Fan/Status');
-      if (statusMessage) {
-        try {
-          const parsed = JSON.parse(statusMessage.payload) as { FanBoostEnable?: string };
-          setVendorBoost(parsed.FanBoostEnable === '1');
-        } catch {
-          setVendorBoost(null);
-        }
-      }
+      const response = await invoke<VendorResponse>('vendor_bus_probe');
+      applyVendorResponse(response);
       return true;
     } catch {
+      vendorOnlineRef.current = false;
       setVendorOnline(false);
       setVendorBoost(null);
       return false;
+    } finally {
+      vendorPending.current = false;
     }
   };
 
-  useEffect(() => {
-    void (async () => {
-      // 首次离线时尝试拉起厂商服务（open-revo 本身已是管理员权限）
-      if (!(await refreshVendorBus())) {
-        await startVendorService();
-        await refreshVendorBus();
-      }
-    })();
-    const timer = window.setInterval(() => {
-      void refreshVendorBus();
-    }, 6000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const toggleVendorBoost = async () => {
+  const connectVendorService = async () => {
     if (vendorBusy) return;
     setVendorBusy(true);
     try {
-      await invoke('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
-      await refreshVendorBus();
+      const started = await invoke<boolean>('vendor_ensure_service');
+      if (started) {
+        await refreshVendorBus();
+      }
     } catch {
+      vendorOnlineRef.current = false;
       setVendorOnline(false);
     } finally {
       setVendorBusy(false);
     }
   };
+
+  const toggleVendorBoost = async () => {
+    if (vendorBusy) return;
+    setVendorBusy(true);
+    try {
+      await invoke<VendorResponse>('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
+      await refreshVendorBus();
+    } catch {
+      vendorOnlineRef.current = false;
+      setVendorOnline(false);
+    } finally {
+      setVendorBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let stopped = false;
+    let timer = 0;
+    const tick = async () => {
+      if (stopped) return;
+      if (document.visibilityState === 'visible') {
+        await refreshVendorBus();
+      }
+      if (stopped) return;
+      // 在线 6 s 一轮，离线退避到 30 s，避免空转与无谓的服务调用
+      timer = window.setTimeout(tick, vendorOnlineRef.current ? 6000 : 30000);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const cpuUsage = clampPct(status.cpu_usage ?? 0);
   const cpuFreq = status.cpu_freq ?? 0;
@@ -364,7 +402,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           <div className="mon-plain">
             <span className="mon-plain-label">厂商通道</span>
             <span className={vendorOnline ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
-              {vendorOnline ? '在线 · localhost:13688' : '离线（GCUBridge 未运行）'}
+              {vendorOnline
+                ? `在线 · localhost:13688 · ${vendorLatency ?? '--'} ms`
+                : '离线（GCUBridge 未运行）'}
             </span>
           </div>
 
@@ -384,12 +424,28 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
           {!vendorOnline && (
             <div className="mon-plain">
-              <span className="mon-plain-label">转速调节</span>
-              <span className="mon-plain-value">
-                {fanControllable ? '本机型可调（电源管理 → 风扇曲线）' : 'EC 自动（未接入调速协议）'}
-              </span>
+              <span className="mon-plain-label">连接</span>
+              <button
+                type="button"
+                className="toggle-btn"
+                onClick={connectVendorService}
+                disabled={vendorBusy}
+              >
+                {vendorBusy ? '启动中…' : '连接厂商通道'}
+              </button>
             </div>
           )}
+
+          <div className="mon-plain">
+            <span className="mon-plain-label">转速调节</span>
+            <span className="mon-plain-value">
+              {vendorOnline
+                ? '厂商总线（强冷）'
+                : fanControllable
+                  ? '本机型可调（电源管理 → 风扇曲线）'
+                  : 'EC 自动（未接入调速协议）'}
+            </span>
+          </div>
         </section>
       </div>
 
