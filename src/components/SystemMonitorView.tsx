@@ -8,6 +8,8 @@ interface SystemMonitorViewProps {
   status: HardwareState;
   /** 机型风扇物理上限（来自 capabilities.max_fan_rpm），用于转速刻度换算 */
   maxFanRpm?: number;
+  /** 该机型 manifest 是否声明了风扇调速能力（fan_custom_curve / set_fan 动作） */
+  fanControllable?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1200;
@@ -28,7 +30,11 @@ const fmtGb = (value: number) => value.toFixed(1);
 const meterTone = (pct: number): MeterTone => (pct >= 96 ? 'hot' : pct >= 88 ? 'warn' : 'ok');
 const fmtWatt = (watts?: number) => (watts !== undefined && watts > 0 ? `${watts.toFixed(1)} W` : '-- W');
 
-export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, maxFanRpm }) => {
+export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
+  status,
+  maxFanRpm,
+  fanControllable = false,
+}) => {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [isDemo, setIsDemo] = useState(false);
 
@@ -273,7 +279,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, ma
           <div className="mon-row">
             <div className="mon-row-head">
               <span className="mon-row-label">处理器</span>
-              <span className="mon-row-value">{cpuFan > 0 ? `${cpuFan} RPM` : '-- RPM'}</span>
+              <span className="mon-row-value">
+                {cpuFan > 0 ? `${cpuFan} RPM · ${Math.round(cpuFanPct)}%` : '-- RPM'}
+              </span>
             </div>
             <RevTickBar value={cpuFanPct} />
           </div>
@@ -291,6 +299,13 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({ status, ma
           <div className="mon-plain">
             <span className="mon-plain-label">散热策略</span>
             <span className="mon-plain-value">{status.fan_boost ? '强冷 / 全速' : '智能曲线'}</span>
+          </div>
+
+          <div className="mon-plain">
+            <span className="mon-plain-label">转速调节</span>
+            <span className="mon-plain-value">
+              {fanControllable ? '本机型可调（电源管理 → 风扇曲线）' : 'EC 自动（本机型未接入调速协议）'}
+            </span>
           </div>
         </section>
       </div>

@@ -665,7 +665,11 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
 
         {activeTab === 'monitor' && (
           <ModuleErrorBoundary moduleName="系统监控" onNavigateToOverview={() => setActiveTab('overview')}>
-            <SystemMonitorView status={status} maxFanRpm={capabilities?.max_fan_rpm} />
+            <SystemMonitorView
+              status={status}
+              maxFanRpm={capabilities?.max_fan_rpm}
+              fanControllable={capabilities?.fan_custom_curve === true}
+            />
           </ModuleErrorBoundary>
         )}
 
