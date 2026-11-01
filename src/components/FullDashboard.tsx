@@ -94,7 +94,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
 
   const handleCopyVersion = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(`v${__APP_VERSION__}`);
+    navigator.clipboard.writeText(`v${__APP_VERSION__} (build ${__BUILD_TIME__})`);
     setCopiedVersion(true);
     setTimeout(() => setCopiedVersion(false), 1500);
   };
@@ -444,7 +444,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
             <span
               className="badge-tag"
               onClick={handleCopyVersion}
-              title={`点击复制版本号: v${__APP_VERSION__}`}
+              title={`点击复制版本号: v${__APP_VERSION__}（构建于 ${__BUILD_TIME__}）`}
             >
               {copiedVersion ? '已复制' : `PRO v${__APP_VERSION__}`}
             </span>

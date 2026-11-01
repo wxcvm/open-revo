@@ -20,6 +20,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
     __RAW_VERSION__: JSON.stringify(pkg.version),
     __GIT_COMMIT__: JSON.stringify(gitHash),
+    __BUILD_TIME__: JSON.stringify(buildStamp),
   },
   clearScreen: false,
   server: {

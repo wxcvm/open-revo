@@ -159,6 +159,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     if (kbBusBusy) return;
     setKbBusBusy(true);
     try {
+      await invoke<boolean>('vendor_set_service_persistent', { enabled: true });
       await invoke<boolean>('vendor_ensure_service');
       await refreshKbBus();
     } catch (error) {
@@ -575,7 +576,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                   </div>
                   <div className="sys-row-controls">
                     <button type="button" className="toggle-btn" disabled={kbBusBusy} onClick={connectKbBus}>
-                      {kbBusBusy ? '连接中…' : '连接厂商通道'}
+                      {kbBusBusy ? '连接中…' : '连接并常开'}
                     </button>
                   </div>
                 </div>

@@ -77,6 +77,13 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const [vendorBoost, setVendorBoost] = useState<boolean | null>(null);
   const [vendorBusy, setVendorBusy] = useState(false);
   const [vendorLatency, setVendorLatency] = useState<number | null>(null);
+  const [vendorPersist, setVendorPersist] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('openrevo.vendorBusPersist') === '1';
+    } catch {
+      return false;
+    }
+  });
   const vendorPending = useRef(false);
   const vendorOnlineRef = useRef(false);
 
@@ -111,6 +118,24 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
       return false;
     } finally {
       vendorPending.current = false;
+    }
+  };
+
+  const setVendorPersistMode = async (enabled: boolean) => {
+    setVendorPersist(enabled);
+    try {
+      window.localStorage.setItem('openrevo.vendorBusPersist', enabled ? '1' : '0');
+    } catch {
+      /* storage may be unavailable */
+    }
+    try {
+      await invoke<boolean>('vendor_set_service_persistent', { enabled });
+      if (enabled) {
+        await invoke<boolean>('vendor_ensure_service');
+        await refreshVendorBus();
+      }
+    } catch (error) {
+      console.error('Failed to switch vendor service mode:', error);
     }
   };
 
@@ -156,6 +181,16 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
       // 在线 6 s 一轮，离线退避到 30 s，避免空转与无谓的服务调用
       timer = window.setTimeout(tick, vendorOnlineRef.current ? 6000 : 30000);
     };
+    void (async () => {
+      if (vendorPersist) {
+        try {
+          await invoke<boolean>('vendor_ensure_service');
+        } catch {
+          /* best effort */
+        }
+        await refreshVendorBus();
+      }
+    })();
     void tick();
     return () => {
       stopped = true;
@@ -436,6 +471,15 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
                 disabled={vendorBusy}
               >
                 {vendorBusy ? '启动中…' : '连接厂商通道'}
+              </button>
+              <button
+                type="button"
+                className={'toggle-btn ' + (vendorPersist ? 'active-emerald' : '')}
+                onClick={() => setVendorPersistMode(!vendorPersist)}
+                disabled={vendorBusy}
+                title="让 GCUBridge 随系统自动启动，厂商通道不再被回收"
+              >
+                {vendorPersist ? '常开已启用' : '常开'}
               </button>
             </div>
           )}
