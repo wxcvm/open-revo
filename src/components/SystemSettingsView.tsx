@@ -651,53 +651,6 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           </div>
         </div>
       )}
-      {kbSleepSupported && (
-        <div className="glass-card">
-          <h3 className="sys-section-title">键盘背光</h3>
-          <div className="sys-rows">
-            <div className="quick-row" style={{ alignItems: 'center' }}>
-              <div>
-                <div className="sys-row-label">
-                  <span>背光休眠延时</span>
-                  <RevBadge variant="info">EC</RevBadge>
-                </div>
-                <div className="sys-row-desc">
-                  无人操作后自动熄灭背光；本机型 EC 只区分「常亮」与「自动熄灭」两态，15/30/60 s 与 10 s 等效
-                </div>
-              </div>
-              <div className="sys-row-controls">
-                {kbTimeoutOptions.map((seconds) => (
-                  <button
-                    key={seconds}
-                    type="button"
-                    className={`toggle-btn ${kbTimeout === seconds ? 'active-indigo' : ''}`}
-                    disabled={kbTimeoutBusy}
-                    onClick={() => applyKbTimeout(seconds)}
-                  >
-                    {seconds === 0 ? '常亮' : `${seconds}s`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="quick-row" style={{ alignItems: 'center' }}>
-              <div>
-                <div className="sys-row-label">
-                  <span>背光亮度</span>
-                  <RevBadge variant="info">硬件</RevBadge>
-                </div>
-                <div className="sys-row-desc">
-                  本机型背光由键盘固件与 Fn 快捷键控制，未暴露软件亮度通道（WMI 与厂商 MQTT 均无亮度应答）
-                </div>
-              </div>
-              <div className="sys-row-controls">
-                <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Fn + F6 / F7</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="glass-card">
         <h3 className="sys-section-title">系统功能开关</h3>
         <div className="sys-rows">
