@@ -131,7 +131,7 @@ export default function App() {
   const isBldPreview = urlParams?.get('preview') === 'bld';
 
   const [isExpanded, setIsExpanded] = useState(isBldPreview);
-  const [activeTab, setActiveTab] = useState<'overview' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'monitor' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor'>('overview');
   const [openCustomTuning, setOpenCustomTuning] = useState(false);
   const [hardwareState, setHardwareState] = useState<HardwareState>(isBldPreview ? BLD_PREVIEW_STATE : DEFAULT_STATE);
   const [isTauriEnv, setIsTauriEnv] = useState(false);
@@ -688,7 +688,7 @@ export default function App() {
   };
 
   // Window resize & layout mode
-  const handleExpandDashboard = async (targetTab?: 'overview' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor' | 'custom_tuning') => {
+  const handleExpandDashboard = async (targetTab?: 'overview' | 'monitor' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor' | 'custom_tuning') => {
     if (targetTab === 'custom_tuning') {
       setActiveTab('overview');
       setOpenCustomTuning(true);

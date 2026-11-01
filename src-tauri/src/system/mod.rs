@@ -21,6 +21,8 @@ pub mod actuator;
 pub mod tray;
 pub mod window;
 pub mod telemetry;
+pub mod sysinfo;
+pub mod gpu_engine;
 pub mod widget_manager;
 pub mod webview_orchestrator;
 pub mod takeover;

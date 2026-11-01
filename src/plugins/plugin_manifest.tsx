@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Activity,
   Gauge,
   Cpu,
   BatteryCharging,
@@ -12,7 +13,7 @@ import {
 } from 'lucide-react';
 import { HardwareState } from '../types/hardware';
 
-export type BuiltinTabId = 'overview' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'plugins' | 'sponsor';
+export type BuiltinTabId = 'overview' | 'monitor' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'plugins' | 'sponsor';
 
 export interface ModelCapabilities {
   id?: string;
@@ -87,6 +88,15 @@ export const BUILTIN_MODULE_SLOTS: BuiltinModuleSlot[] = [
     order: 10,
     icon: Gauge,
     description: '整机实时传感器监控、模式切换仪表盘与电池健康看板',
+    isVisible: () => true,
+  },
+  {
+    id: 'monitor',
+    name: '系统监控',
+    tabClassName: 'tab-monitor',
+    order: 15,
+    icon: Activity,
+    description: 'CPU / 显卡 / 内存 / 卷容量 / 风扇转速 分段式实时遥测仪表盘',
     isVisible: () => true,
   },
   {

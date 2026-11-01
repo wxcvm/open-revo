@@ -165,6 +165,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::hardware_cmd::get_model_capabilities,
             commands::hardware_cmd::get_hardware_status,
+            commands::sysinfo_cmd::get_system_stats,
             commands::hardware_cmd::set_power_mode,
             commands::hardware_cmd::set_fan_boost,
             commands::hardware_cmd::set_battery_limit,

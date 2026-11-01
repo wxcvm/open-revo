@@ -23,6 +23,7 @@ pub struct HardwareState {
     pub cpu_temp: i32,
     pub cpu_usage: u32,
     pub cpu_freq: u32,
+    pub cpu_base_mhz: u32,
     pub gpu_temp: u32,
     pub cpu_fan_rpm: u16,
     pub gpu_fan_rpm: u16,
@@ -109,7 +110,7 @@ pub fn collect_hardware_state(
         crate::commands::power_cmd::check_dgpu_present()
     };
 
-    let (gpu_temp, gpu_usage, gpu_core_freq, gpu_mem_freq, gpu_vram_mb, gpu_vram_used_mb, gpu_power_w, gpu_name, has_gpu) = {
+    let (gpu_temp, nvapi_gpu_usage, gpu_core_freq, gpu_mem_freq, gpu_vram_mb, gpu_vram_used_mb, gpu_power_w, gpu_name, has_gpu) = {
         if !is_discrete_gpu_supported {
             // Declarative Decision Center Authority: strictly pure iGPU / thin & light laptop, no dGPU
             (0, 0, 0, 0, 0, 0, 0.0, "".to_string(), false)
@@ -137,6 +138,15 @@ pub fn collect_hardware_state(
         }
     };
 
+    // Generic WDDM fallback: NVAPI only speaks NVIDIA. On AMD / Intel iGPU machines
+    // (e.g. Ryzen AI 9 HX 365 + Radeon 880M) utilisation comes from PDH GPU Engine counters,
+    // so the 系统监控 显卡 card never stays pinned at 0 %.
+    let gpu_usage = if query_gpu && !has_gpu {
+        crate::system::gpu_engine::sample_usage()
+    } else {
+        nvapi_gpu_usage
+    };
+
     let cpu = get_cpu_monitor();
     let cpu_temp = cpu.get_temp();
     let oem_running = process::is_oem_service_running();
@@ -153,6 +163,7 @@ pub fn collect_hardware_state(
         cpu_temp,
         cpu_usage: cpu.get_usage(),
         cpu_freq: cpu.get_current_mhz(),
+        cpu_base_mhz: cpu.get_base_mhz(),
         gpu_temp,
         cpu_fan_rpm,
         gpu_fan_rpm,

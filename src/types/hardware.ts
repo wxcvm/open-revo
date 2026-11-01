@@ -16,6 +16,7 @@ export interface HardwareState {
   cpu_temp: number;          // °C
   cpu_usage: number;         // %
   cpu_freq: number;          // MHz
+  cpu_base_mhz?: number;     // MHz (rated/base clock, e.g. 2000)
   gpu_temp: number;          // °C
   cpu_fan_rpm: number;       // RPM
   gpu_fan_rpm: number;       // RPM
@@ -243,6 +244,30 @@ export interface DisplayTuningState {
   active_preset: DisplayColorPreset;
   presets: DisplayColorPreset[];
   factory_presets?: DisplayColorPreset[];
+}
+
+export interface MemoryStats {
+  total_mb: number;
+  used_mb: number;
+  free_mb: number;
+  usage: number;      // 0 - 100 使用率
+  percent_load?: number;
+}
+
+export interface DiskUsage {
+  letter: string;     // "C:" / "D:"
+  label: string;      // 卷标，可能为空
+  fs: string;         // "NTFS" / "exFAT"
+  total_gb: number;
+  used_gb: number;
+  free_gb: number;
+  usage: number;      // 0 - 100 使用率
+  is_system: boolean;
+}
+
+export interface SystemStats {
+  mem: MemoryStats;
+  disks: DiskUsage[];
 }
 
 export interface CpuFreqInfo {

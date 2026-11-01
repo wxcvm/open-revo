@@ -9,6 +9,7 @@ import { SponsorView } from './SponsorView';
 import { CustomTuningPanel } from './CustomTuningPanel';
 import { WaterCoolerView, CoolerTelemetry } from './WaterCoolerView';
 import { SystemSettingsView, OsdConfig } from './SystemSettingsView';
+import { SystemMonitorView } from './SystemMonitorView';
 import { PluginsView, CustomPluginItem } from './PluginsView';
 import { PluginTabHost } from './PluginTabHost';
 import { ModuleErrorBoundary } from './ModuleErrorBoundary';
@@ -659,6 +660,12 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
               checkOemGuard={checkOemGuard}
               profileVersion={profileVersion}
             />
+          </ModuleErrorBoundary>
+        )}
+
+        {activeTab === 'monitor' && (
+          <ModuleErrorBoundary moduleName="系统监控" onNavigateToOverview={() => setActiveTab('overview')}>
+            <SystemMonitorView status={status} maxFanRpm={capabilities?.max_fan_rpm} />
           </ModuleErrorBoundary>
         )}
 
