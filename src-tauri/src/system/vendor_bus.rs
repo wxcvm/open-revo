@@ -242,6 +242,7 @@ pub fn command(topic: &str, payload: &str, budget: Duration) -> Result<Vec<BusMe
     with_client(|client| publish_then_drain(client, (topic, payload), budget, 1))
 }
 
+#[allow(dead_code)]
 pub fn batch(requests: &[(&str, &str)], budget: Duration) -> Result<Vec<BusMessage>, String> {
     let started = Instant::now();
     with_client(|client| {
@@ -339,12 +340,17 @@ pub fn apply_fan_preset(preset: &str) -> Result<Vec<BusMessage>, String> {
         "turbo" => ("OpenRevo Turbo", PRESET_TURBO),
         _ => return restore_fan_curve(),
     };
-    batch(
-        &[
-            ("Fan/Control", "{\"Action\":\"OPERATING_CUSTOM_MODE\",\"ProfileIndex\":\"0\"}"),
-            ("LCHWOC/Control", "{\"IsCustomRun\":true}"),
-        ],
+    // 逐条发送：连发会触发厂商 broker 的 NullReferenceException 崩溃
+    command(
+        "Fan/Control",
+        "{\"Action\":\"OPERATING_CUSTOM_MODE\",\"ProfileIndex\":\"0\"}",
         Duration::from_millis(400),
+    )?;
+    std::thread::sleep(Duration::from_millis(300));
+    command(
+        "LCHWOC/Control",
+        "{\"IsCustomRun\":true}",
+        Duration::from_millis(300),
     )?;
     set_fan_table(label, "CPU", &duty)?;
     let _ = set_fan_table(label, "GPU", &duty);
