@@ -173,7 +173,9 @@ fn drain(stream: &mut TcpStream, budget: Duration, min_replies: usize) -> Vec<Bu
                 }
             }
             None => {
-                if !messages.is_empty()
+                // 只有凑齐期望的回复数才允许因静默提前收工；
+                // 否则晚到的回复（如 Setting/Status）会被截掉，调用方误判离线。
+                if messages.len() >= min_replies
                     && Instant::now().saturating_duration_since(last_message_at) >= IDLE_AFTER_REPLY
                 {
                     break;

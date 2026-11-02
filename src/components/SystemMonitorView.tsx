@@ -166,8 +166,13 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     if (vendorBusy) return;
     setVendorBusy(true);
     try {
-      await invoke<VendorResponse>('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
-      await refreshVendorBus();
+      const response = await invoke<VendorResponse>('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
+      applyVendorResponse(response);
+      const status = response.messages.find((message) => message.topic === 'Fan/Status');
+      if (status) {
+        const parsed = JSON.parse(status.payload) as { FanBoostEnable?: string };
+        setVendorBoost(parsed.FanBoostEnable === '1');
+      }
     } catch {
       vendorOnlineRef.current = false;
       setVendorOnline(false);

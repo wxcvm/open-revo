@@ -22,6 +22,7 @@ import {
 import { HardwareState } from '../types/hardware';
 import { RevBadge, RevSwitch } from './ui';
 import { ModelCapabilities } from '../plugins/plugin_manifest';
+import { setVendorBusActive } from '../state/vendorBus';
 
 export interface OsdConfig {
   enabled: boolean;
@@ -148,6 +149,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
         timerSec: Number(parsed.CloseTimer ?? 0),
         backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF',
       });
+      setVendorBusActive(true);
       return true;
     } catch (error) {
       console.error('vendor bus probe failed:', error);
@@ -173,8 +175,14 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     if (kbBusBusy) return;
     setKbBusBusy(true);
     try {
-      await invoke('vendor_set_kb_timer', { seconds: sec });
-      await refreshKbBus();
+      const response = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_set_kb_timer', { seconds: sec });
+      const status = response.messages.find((message) => message.topic === 'Setting/Status');
+      if (status) {
+        const parsed = JSON.parse(status.payload) as { CloseTimer?: number | string };
+        setKbBus((prev) => ({ ...prev, timerSec: Number(parsed.CloseTimer ?? sec) }));
+      } else {
+        setKbBus((prev) => ({ ...prev, timerSec: sec }));
+      }
     } catch (error) {
       console.error('Failed to set keyboard timer:', error);
     } finally {
@@ -189,6 +197,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
       await invoke<boolean>('vendor_set_service_persistent', { enabled: true });
       await invoke<boolean>('vendor_ensure_service');
       await refreshKbBus();
+      setVendorBusActive(true);
     } catch (error) {
       console.error('Failed to start vendor service:', error);
     } finally {
@@ -200,8 +209,14 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     if (kbBusBusy) return;
     setKbBusBusy(true);
     try {
-      await invoke('vendor_set_kb_backlight', { enabled: on });
-      await refreshKbBus();
+      const response = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_set_kb_backlight', { enabled: on });
+      const status = response.messages.find((message) => message.topic === 'Setting/Status');
+      if (status) {
+        const parsed = JSON.parse(status.payload) as { SingleColorKBBL?: string };
+        setKbBus((prev) => ({ ...prev, backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF' }));
+      } else {
+        setKbBus((prev) => ({ ...prev, backlight: on }));
+      }
     } catch (error) {
       console.error('Failed to toggle keyboard backlight:', error);
     } finally {
