@@ -444,8 +444,9 @@ pub fn ensure_service() -> bool {
             .args(["start", "GCUBridge"])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn();
-        for _ in 0..20 {
-            std::thread::sleep(Duration::from_millis(150));
+        // 厂商服务从 START_PENDING 到 broker 绑定端口要 6~10 秒，窗口给足 15 秒
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(250));
             if is_available() {
                 return true;
             }
