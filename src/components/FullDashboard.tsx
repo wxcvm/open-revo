@@ -10,7 +10,6 @@ import { CustomTuningPanel } from './CustomTuningPanel';
 import { WaterCoolerView, CoolerTelemetry } from './WaterCoolerView';
 import { SystemSettingsView, OsdConfig } from './SystemSettingsView';
 import { SystemMonitorView } from './SystemMonitorView';
-import { getVendorBusActive, subscribeVendorBus } from '../state/vendorBus';
 import { PluginsView, CustomPluginItem } from './PluginsView';
 import { PluginTabHost } from './PluginTabHost';
 import { ModuleErrorBoundary } from './ModuleErrorBoundary';
@@ -83,9 +82,6 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
   onPreviewFormFactor: propOnPreviewFormFactor,
 }) => {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab || 'overview');
-  const [vendorBusActive, setVendorBusActiveState] = useState<boolean>(getVendorBusActive());
-
-  useEffect(() => subscribeVendorBus(setVendorBusActiveState), []);
   const [isCustomTuningOpen, setIsCustomTuningOpen] = useState(initialOpenCustomTuning);
   const [showOemModal, setShowOemModal] = useState(false);
   const [isSwitchingService, setIsSwitchingService] = useState(false);
@@ -100,7 +96,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
   };
 
   const checkOemGuard = (action: () => void) => {
-    if (status.oem_running) {
+    if (status.oem_running || status.vendor_bus_selected) {
       setShowOemModal(true);
       return;
     }
@@ -479,7 +475,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
           onMouseDown={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          {status.oem_installed && status.oem_running && !vendorBusActive && (
+          {status.oem_installed && status.oem_running && !status.vendor_bus_selected && (
             <button
               onClick={() => handleTakeoverOem()}
               disabled={isSwitchingService}

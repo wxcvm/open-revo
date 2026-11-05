@@ -198,20 +198,26 @@ pub fn ensure_standard_balanced_plan() {
 pub fn spawn_hardware_state_restore(ec_for_restore: crate::driver::ec_bridge::SharedEcBridge) {
     std::thread::spawn(move || {
         crate::system::boot_trace::boot_log("RESTORE", "Background hardware state restore thread started");
-        let cfg = crate::system::config::load_config();
-        let is_oem_running = crate::system::process::is_oem_service_running();
+        let cfg = {
+            let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
+            let cfg = crate::system::config::load_config();
+            if cfg.takeover_oem {
+                let _ = crate::system::service_mgr::pause_oem_services();
+            }
+            cfg
+        };
 
-        // Enforce OEM takeover if previously activated by user
-        if cfg.takeover_oem {
-            let _ = crate::system::service_mgr::pause_oem_services();
-        } else if is_oem_running {
+        if !cfg.takeover_oem
+            && ((cfg.use_vendor_bus && crate::system::vendor_bus::service_exists("GCUBridge"))
+                || crate::system::process::is_oem_service_running())
+        {
             // PASSIVE SAFEGUARD ACTIVATION:
             // If OEM service (GCUService/GCUBridge/ControlCenter) is active and user hasn't taken over,
             // DO NOT perform any hardware writes, refresh rate switches, or lighting streams!
             // This strictly prevents hardware register collisions and display blinking loops.
             crate::log_warn!(
                 "MAIN",
-                "OEM Service is active and takeover_oem is false! PASSIVE SAFEGUARD ACTIVATED: suppressing startup hardware writes, display refresh rate, and lighting streamer."
+                "Vendor controls selected or OEM service active. PASSIVE SAFEGUARD ACTIVATED: suppressing startup hardware writes, display refresh rate, and lighting streamer."
             );
             // Safe maintenance only: task scheduler sync & self-heal
             crate::system::autostart::sync_autostart_target_path();

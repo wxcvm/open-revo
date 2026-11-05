@@ -32,6 +32,7 @@ export interface HardwareState {
   unlock_battery_power_limit?: boolean;  // Unlock Turbo and Custom mode restrictions on battery
   win_key_locked: boolean;   // bool
   is_mock?: boolean;         // true if running in safe mock mode
+  vendor_bus_selected?: boolean;
   oem_running?: boolean;     // true if GCUService is running
   oem_installed?: boolean;   // true if official control center is installed
   autostart?: boolean;       // true if autostart enabled

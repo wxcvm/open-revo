@@ -84,7 +84,7 @@ export interface DrawerLightingCardProps {
 }
 
 export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
-  status: _status,
+  status,
   capabilities,
   onExpandDashboard,
 }) => {
@@ -383,6 +383,19 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
     capabilities?.rgb_keyboard?.sleep_timeout_supported ||
     (capabilities?.rgb_keyboard?.supported === false && capabilities?.form_factor === 'thin_light')
   );
+
+  if (status?.vendor_bus_selected) {
+    return (
+      <div className="m-card">
+        <div className="m-card-header">
+          <div className="m-header-left"><Keyboard size={13} /> 键盘背光</div>
+        </div>
+        <button type="button" className="toggle-btn" onClick={() => onExpandDashboard('system')}>
+          在系统设置中控制厂商背光
+        </button>
+      </div>
+    );
+  }
 
   if (isSleepTimeoutMode) {
     return (

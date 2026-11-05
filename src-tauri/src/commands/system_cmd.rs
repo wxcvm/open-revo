@@ -41,6 +41,7 @@ pub struct HardwareState {
     pub is_mock: bool,
     pub oem_running: bool,
     pub oem_installed: bool,
+    pub vendor_bus_selected: bool,
     pub autostart: bool,
     pub is_intel_13_14_gen: bool,
     pub water_cooler_enabled: bool,
@@ -191,6 +192,7 @@ pub fn collect_hardware_state(
         is_mock,
         oem_running,
         oem_installed,
+        vendor_bus_selected: cfg.use_vendor_bus && !cfg.takeover_oem,
         autostart: autostart_enabled,
         is_intel_13_14_gen,
         water_cooler_enabled: crate::system::config::is_water_cooler_enabled(),
@@ -275,9 +277,13 @@ pub fn toggle_oem_service(
     ec_state: State<'_, SharedEcBridge>,
     gpu_state: State<'_, SharedGpuBridge>,
 ) -> Result<HardwareState, String> {
-    let mut cfg = crate::system::config::load_config();
-    cfg.takeover_oem = take_over;
-    crate::system::config::save_config(&cfg);
+    let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK
+        .try_lock()
+        .ok_or("厂商通道正在连接或处理命令，请稍后再试")?;
+    let cfg = crate::system::config::modify_config(|cfg| {
+        cfg.select_local_takeover(take_over);
+        cfg.clone()
+    });
 
     if take_over {
         let _ = service_mgr::pause_oem_services();

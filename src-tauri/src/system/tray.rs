@@ -254,6 +254,10 @@ pub fn handle_tray_menu_event(
             }
         }
         "toggle_fan" => {
+            if crate::system::config::load_config().use_vendor_bus {
+                crate::log_warn!("TRAY", "Use the monitor page to switch vendor-controlled fan boost");
+                return;
+            }
             let ec = ec_clone.lock();
             let current = ec.is_fan_boost();
             let next = !current;
@@ -271,13 +275,19 @@ pub fn handle_tray_menu_event(
             let _ = app_handle.emit_to("osd", "physical-fan-boost-switched", next);
         }
         "takeover_toggle" => {
-            let is_running = crate::system::process::is_oem_service_running();
-            if is_running {
+            let Some(_guard) = crate::system::vendor_bus::CONTROL_MODE_LOCK.try_lock() else {
+                crate::log_warn!("TAKEOVER", "OEM mode switch skipped: vendor channel is busy");
+                return;
+            };
+            let take_over = crate::system::process::is_oem_service_running()
+                || crate::system::config::load_config().use_vendor_bus;
+            crate::system::config::modify_config(|cfg| cfg.select_local_takeover(take_over));
+            if take_over {
                 let _ = crate::system::service_mgr::pause_oem_services();
             } else {
                 let _ = crate::system::service_mgr::resume_oem_services();
             }
-            let next_state = !is_running;
+            let next_state = !take_over;
             let _ = app_handle.emit("oem-service-status-changed", next_state);
             let _ = app_handle.emit_to("main", "oem-service-status-changed", next_state);
         }

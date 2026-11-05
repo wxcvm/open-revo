@@ -133,7 +133,7 @@ export const MiniDrawer: React.FC<MiniDrawerProps> = ({
   }, []);
 
   const checkOemGuard = (action: () => void) => {
-    if (status.oem_running) {
+    if (status.oem_running || status.vendor_bus_selected) {
       setShowOemModal(true);
       return;
     }

@@ -96,6 +96,8 @@ pub struct AppConfig {
     pub wifi_adapter_name: String,
     #[serde(default)]
     pub takeover_oem: bool,
+    #[serde(default)]
+    pub use_vendor_bus: bool,
 
     // Consolidated RGB Lighting Presets
     #[serde(default)]
@@ -433,6 +435,7 @@ impl Default for AppConfig {
             fn_lock_enabled: false,
             wifi_adapter_name: String::new(),
             takeover_oem: false,
+            use_vendor_bus: false,
 
             lighting: crate::driver::ite_lighting::LightingPresetState::default(),
             keyboard_sleep_timeout: 0,
@@ -1296,6 +1299,20 @@ pub fn save_config(cfg: &AppConfig) {
     let mut guard = CONFIG_CACHE.write();
     *guard = Some(cfg.clone());
     save_config_to_disk(cfg);
+}
+
+impl AppConfig {
+    pub fn select_vendor_control(&mut self, enabled: bool) {
+        self.use_vendor_bus = enabled;
+        if enabled {
+            self.takeover_oem = false;
+        }
+    }
+
+    pub fn select_local_takeover(&mut self, enabled: bool) {
+        self.takeover_oem = enabled;
+        self.use_vendor_bus = false;
+    }
 }
 
 /// Atomically modifies the active configuration in-place under an exclusive write lock,

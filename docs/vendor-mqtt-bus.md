@@ -53,30 +53,26 @@ FAN_BOOST_OFF -> 再读 Fan/Status: FanBoostEnable = "0"
 
 也就是说：**写入路径可用且可逆**，风扇曲线（SET_FAN_SPEED_CURVE_SETTING）与模式切换走同一总线。
 
-## 5. open-revo 侧的接入
+## 5. OpenRevo 侧的接入
 
-`src-tauri/src/system/vendor_bus.rs`：不引第三方 MQTT 库，直接手写 CONNECT / SUBSCRIBE / PUBLISH 报文。
-
-命令：
-
-| 命令 | 作用 | 保护 |
+| 功能 | 状态来源 | 确认方式 |
 | --- | --- | --- |
-| `vendor_bus_probe` | 只读：Fan/Status + Fan/Table | — |
-| `vendor_fan_boost(enabled)` | 强冷开关 | 仅发 FAN_BOOST_ON/OFF |
-| `vendor_set_power_mode(mode)` | 1 办公 / 2 均衡 / 3 狂暴 / 4 自定义 | 限制 1..4 |
-| `vendor_set_fan_table(target, duty, name)` | 16 点风扇曲线 | duty 必须 16 项且 0..100，target 仅 CPU/GPU |
+| 系统监控 → 强冷 | `Fan/Status.FanBoostEnable` | 命令回包或一次 `GETSTATUS` 必须与目标值匹配 |
+| 系统设置 → 键盘背光 | `Setting/Status.SingleColorKBBL`、`CloseTimer` | 只显示已读到的值；写入不能确认时保留原状态并报错 |
+| 背光延时 | `KEYBOARD_LIGHTBAR_TIMER_ON` / `OFF` | 字段名为 `Mins`，实际单位为秒 |
 
-服务未启动时 `vendor_bus_probe` 直接返回 `vendor bus offline`，前端显示「厂商通道 离线」，不会发送任何报文。
+定时档位按厂商 UI 的映射提供：10/15/20/30/45 秒，1/2/5/10/20/30 分钟，
+1/2/3 小时，以及永不。按本机能力，厂商模式不提供手动风扇曲线或显卡模式切换。
 
-## 6. 前置条件
+## 6. 连接与接管是两种互斥模式
 
-厂商 broker 由 `GCUBridge` 服务托管（默认 Stopped）：
-
-```powershell
-Start-Service GCUBridge      # 需要管理员
-```
-
-启动后 open-revo 的「系统监控 → 风扇转速」卡片会显示 `厂商通道 在线 · localhost:13688` 并出现「强冷」开关。
+- 「连接」只启动已安装的厂商后台；「连接并常开」还将 `GCUBridge` 设为 Windows 自动启动。
+  若已注册按需启动的 `ACPIDriver`，先启动驱动，再启动后台；不安装驱动、不恢复官方 UI 或官方任务。
+- 连接成功后记录厂商模式并清除旧的本地接管标记。OpenRevo 下次启动不再停掉该服务，
+  同时跳过会争用硬件的启动恢复写入。退出页面或暂时收不到状态不会改变选定模式。
+- 「关闭常开」将后台改回按需启动，不会立即中止已连接的服务。
+  若确实要改回本地接管，可用托盘「接管/恢复 官方后台服务」。
+- 如果只想继续看监控，厂商服务未安装也不影响 CPU/GPU/风扇 RPM 的独立采集。
 
 ## 7. 未打通：自定义风扇表（2026-11-01 实测）
 
@@ -95,26 +91,13 @@ RESTORE_FAN_SPEED_CURVE_SETTING_ALL
 所以 open-revo 目前只对外暴露已验证可用的 `FAN_BOOST_ON/OFF`（强冷）。
 `vendor_bus::apply_fan_preset` 保留在代码里但未接到界面，等把服务端校验摸清再启用。
 
-## 8. 时延预算与轮询策略（避免卡死）
+## 8. 时延与故障处理
 
-| 环节 | 上限 |
-| --- | --- |
-| TCP connect | 300 ms |
-| socket read | 200 ms |
-| 单条命令总预算 | 600 ms |
-| probe（单连接批量取 Fan/Status + Fan/Table） | 700 ms |
-| 收到首个回复后的静默退出 | 150 ms |
-| 服务拉起轮询 | 150 ms × 20（≤3 s，仅用户点击触发） |
-
-前端：单飞守卫（上一次未返回不发第二次）、只在 `document.visibilityState === 'visible'` 时轮询、在线 6 s / 离线 30 s 退避、`vendor_ensure_service` 改为「连接厂商通道」按钮触发。
-
-实测（本机，GCUBridge 运行中）：
-
-```
-is_available  ≈ 210 ms
-probe         ≈ 430 ms（2 条消息）
-fan_boost     ≈ 607 ms
-离线（服务停止）    ≈ 310 ms，直接返回 vendor bus offline
-```
-
-Rust 侧所有命令均为 `async fn` + `spawn_blocking` + 全局串行锁，WebView 主线程不再等待 broker I/O。
+- 打开监控页只查 `Fan/Status`；打开系统设置只查 `Setting/Status`。
+  常规轮询不读未启用的风扇曲线。MQTT 连接复用，命令逐条发送，不以无关或保留的消息判定在线。
+- TCP 连接限时 300 ms，单次状态等待限时 600 ms。写入没有匹配回执时只补发一次只读查询，
+  不重放控制命令；驱动或服务启动失败时显示系统返回错误。
+- 首页不访问总线。监控或系统设置可见时，在线约 15 秒刷新；离线约 30 秒重试。
+  只有选择了厂商模式且启用常开，才会对确认已停止的后台尝试恢复；不创建重启任务，
+  不保证不稳定的 OEM 进程始终存活。
+- 厂商通道是现有 Windows OEM 服务的兼容路径，不代表已经实现无厂商依赖的硬件写入。

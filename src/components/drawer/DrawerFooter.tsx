@@ -78,7 +78,7 @@ export const DrawerFooter: React.FC<DrawerFooterProps> = ({
           </label>
 
           {/* 接管/恢复官方控制台按钮 (若机器未安装官方控制台则隐藏) */}
-          {status.oem_installed && (
+          {status.oem_installed && !status.vendor_bus_selected && (
             <button
               onClick={() => handleServiceToggle(status.oem_running ?? false)}
               disabled={isSwitchingService}

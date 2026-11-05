@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -22,7 +22,7 @@ import {
 import { HardwareState } from '../types/hardware';
 import { RevBadge, RevSwitch } from './ui';
 import { ModelCapabilities } from '../plugins/plugin_manifest';
-import { setVendorBusActive } from '../state/vendorBus';
+import { parseKeyboard, useVendorControl } from '../state/vendorControl';
 
 export interface OsdConfig {
   enabled: boolean;
@@ -102,127 +102,13 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     }
   };
 
-  const KB_TIMER_PRESETS = [
-    { sec: 0, label: '永不' },
-    { sec: 60, label: '1 分钟' },
-    { sec: 300, label: '5 分钟' },
-    { sec: 600, label: '10 分钟' },
-    { sec: 900, label: '15 分钟' },
-    { sec: 1800, label: '30 分钟' },
-    { sec: 3600, label: '60 分钟' },
-  ];
-  const [kbBus, setKbBus] = useState<{ online: boolean; timerSec: number; backlight: boolean }>({
-    online: false,
-    timerSec: 600,
-    backlight: true,
-  });
-  const [kbBusBusy, setKbBusBusy] = useState(false);
-  const [kbStackPresent, setKbStackPresent] = useState(true);
-
-  const formatKbTimer = (sec: number): string => (sec <= 0 ? '永不关闭' : Math.round(sec / 60) + ' 分钟');
-
-  const kbBusRef = useRef(kbBus);
-  useEffect(() => {
-    kbBusRef.current = kbBus;
-  }, [kbBus]);
-
-  const refreshKbBusWithRetry = async (attempts = 3) => {
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const online = await refreshKbBus();
-      if (online) return true;
-      await new Promise((resolve) => window.setTimeout(resolve, 600));
-    }
-    return false;
-  };
-
-  const refreshKbBus = async (): Promise<boolean> => {
-    try {
-      const res = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_bus_probe');
-      const status = res.messages.find((message) => message.topic === 'Setting/Status');
-      if (!status) {
-        setKbBus((prev) => ({ ...prev, online: false }));
-        return false;
-      }
-      const parsed = JSON.parse(status.payload) as { CloseTimer?: number | string; SingleColorKBBL?: string };
-      setKbBus({
-        online: true,
-        timerSec: Number(parsed.CloseTimer ?? 0),
-        backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF',
-      });
-      setVendorBusActive(true);
-      return true;
-    } catch (error) {
-      console.error('vendor bus probe failed:', error);
-      setKbBus((prev) => ({ ...prev, online: false }));
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    void invoke<boolean>('vendor_stack_present')
-      .then((present) => setKbStackPresent(present))
-      .catch(() => setKbStackPresent(true));
-    void refreshKbBusWithRetry();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void refreshKbBus();
-      }
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const applyKbTimer = async (sec: number) => {
-    if (kbBusBusy) return;
-    setKbBusBusy(true);
-    try {
-      const response = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_set_kb_timer', { seconds: sec });
-      const status = response.messages.find((message) => message.topic === 'Setting/Status');
-      if (status) {
-        const parsed = JSON.parse(status.payload) as { CloseTimer?: number | string };
-        setKbBus((prev) => ({ ...prev, timerSec: Number(parsed.CloseTimer ?? sec) }));
-      } else {
-        setKbBus((prev) => ({ ...prev, timerSec: sec }));
-      }
-    } catch (error) {
-      console.error('Failed to set keyboard timer:', error);
-    } finally {
-      setKbBusBusy(false);
-    }
-  };
-
-  const connectKbBus = async () => {
-    if (kbBusBusy) return;
-    setKbBusBusy(true);
-    try {
-      await invoke<boolean>('vendor_set_service_persistent', { enabled: true });
-      await invoke<boolean>('vendor_ensure_service');
-      await refreshKbBus();
-      setVendorBusActive(true);
-    } catch (error) {
-      console.error('Failed to start vendor service:', error);
-    } finally {
-      setKbBusBusy(false);
-    }
-  };
-
-  const applyKbBacklight = async (on: boolean) => {
-    if (kbBusBusy) return;
-    setKbBusBusy(true);
-    try {
-      const response = await invoke<{ messages: { topic: string; payload: string }[] }>('vendor_set_kb_backlight', { enabled: on });
-      const status = response.messages.find((message) => message.topic === 'Setting/Status');
-      if (status) {
-        const parsed = JSON.parse(status.payload) as { SingleColorKBBL?: string };
-        setKbBus((prev) => ({ ...prev, backlight: parsed.SingleColorKBBL !== 'SINGLE_COLOR_KBBL_STATUS_OFF' }));
-      } else {
-        setKbBus((prev) => ({ ...prev, backlight: on }));
-      }
-    } catch (error) {
-      console.error('Failed to toggle keyboard backlight:', error);
-    } finally {
-      setKbBusBusy(false);
-    }
-  };
+  const vendor = useVendorControl('vendor_probe_keyboard', 'Setting/Status', parseKeyboard);
+  const keyboard = vendor.snapshot?.value;
+  const vendorBusy = vendor.busy || vendor.checking;
+  const timerPresets = [10, 15, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 10800, 0];
+  const formatKbTimer = (sec: number): string =>
+    sec === 0 ? '永不' : sec % 3600 === 0 ? `${sec / 3600} 小时`
+      : sec % 60 === 0 ? `${sec / 60} 分钟` : `${sec} 秒`;
 
   const [logStatus, setLogStatus] = useState<{
     visible: boolean;
@@ -553,119 +439,74 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   return (
     <div className="sys-page">
-      {(kbBus.online || kbSleepSupported) && (
+      {(vendor.service?.present || kbSleepSupported) && (
         <div className="glass-card">
           <h3 className="sys-section-title">键盘背光</h3>
           <div className="sys-rows">
-            {kbBus.online ? (
+            {keyboard && (
               <>
-                <div className="quick-row" style={{ alignItems: 'center' }}>
-                  <div>
-                    <div className="sys-row-label">
-                      <span>键盘背光开关</span>
-                      <RevBadge variant="success">厂商总线</RevBadge>
-                    </div>
-                    <div className="sys-row-desc">通过官方服务下发，与机械革命控制中心的开关等价</div>
-                  </div>
-                  <div className="sys-row-controls">
-                    <button
-                      type="button"
-                      className={'toggle-btn ' + (kbBus.backlight ? 'active-emerald' : '')}
-                      disabled={kbBusBusy}
-                      onClick={() => applyKbBacklight(!kbBus.backlight)}
-                    >
-                      {kbBus.backlight ? '已开启' : '已关闭'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="quick-row" style={{ alignItems: 'center' }}>
-                  <div>
-                    <div className="sys-row-label">
-                      <span>灯效睡眠时间</span>
-                      <RevBadge variant="info">CloseTimer</RevBadge>
-                    </div>
-                    <div className="sys-row-desc">
-                      无人操作后自动关闭背光；当前 {formatKbTimer(kbBus.timerSec)}（官方按分钟显示，底层按秒存储）
-                    </div>
-                  </div>
-                  <div className="sys-row-controls">
-                    {KB_TIMER_PRESETS.map((preset) => (
-                      <button
-                        key={preset.sec}
-                        type="button"
-                        className={'toggle-btn ' + (kbBus.timerSec === preset.sec ? 'active-indigo' : '')}
-                        disabled={kbBusBusy}
-                        onClick={() => applyKbTimer(preset.sec)}
-                      >
-                        {preset.label}
+                {keyboard.backlight !== null && (
+                  <div className="quick-row">
+                    <div className="sys-row-label">键盘背光开关</div>
+                    <div className="sys-row-controls">
+                      <button type="button" className={'toggle-btn ' + (keyboard.backlight ? 'active-emerald' : '')}
+                        disabled={vendorBusy} onClick={() => vendor.write('vendor_set_kb_backlight', { enabled: !keyboard.backlight })}>
+                        {keyboard.backlight ? '已开启' : '已关闭'}
                       </button>
-                    ))}
+                    </div>
                   </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="quick-row" style={{ alignItems: 'center' }}>
+                )}
+                <div className="quick-row">
                   <div>
-                    <div className="sys-row-label">
-                      <span>{kbStackPresent ? '分钟级控制' : '分钟级控制（不可用）'}</span>
-                      <RevBadge variant="warning">{kbStackPresent ? '未连接' : '已卸载'}</RevBadge>
-                    </div>
-                    <div className="sys-row-desc">
-                      {kbStackPresent
-                        ? '启动官方后台服务后即可获得「永不 / 1 / 5 / 10 / 15 / 30 / 60 分钟」与背光开关'
-                        : '机械革命控制中心已卸载，后台服务与 MQTT 总线都不在了；重装官方控制中心后此功能自动恢复'}
-                    </div>
+                    <div className="sys-row-label">灯效睡眠时间 <RevBadge variant="success">厂商通道</RevBadge></div>
+                    <div className="sys-row-desc">无人操作后自动关闭背光；当前 {formatKbTimer(keyboard.timerSec)}</div>
                   </div>
                   <div className="sys-row-controls">
-                    {kbStackPresent ? (
-                      <button type="button" className="toggle-btn" disabled={kbBusBusy} onClick={connectKbBus}>
-                        {kbBusBusy ? '连接中…' : '连接并常开'}
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>需要重装官方控制中心</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="quick-row" style={{ alignItems: 'center' }}>
-                  <div>
-                    <div className="sys-row-label">
-                      <span>背光休眠延时</span>
-                      <RevBadge variant="info">EC</RevBadge>
-                    </div>
-                    <div className="sys-row-desc">厂商总线未连接时的降级通道：本机型 EC 只区分「常亮」与「自动熄灭」两态</div>
-                  </div>
-                  <div className="sys-row-controls">
-                    {kbTimeoutOptions.map((seconds) => (
-                      <button
-                        key={seconds}
-                        type="button"
-                        className={'toggle-btn ' + (kbTimeout === seconds ? 'active-indigo' : '')}
-                        disabled={kbTimeoutBusy}
-                        onClick={() => applyKbTimeout(seconds)}
-                      >
-                        {seconds === 0 ? '常亮' : seconds + 's'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="quick-row" style={{ alignItems: 'center' }}>
-                  <div>
-                    <div className="sys-row-label">
-                      <span>背光亮度</span>
-                      <RevBadge variant="info">硬件</RevBadge>
-                    </div>
-                    <div className="sys-row-desc">由键盘固件与 Fn 快捷键控制；接上厂商通道后可获得开关与分钟级延时</div>
-                  </div>
-                  <div className="sys-row-controls">
-                    <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>Fn + F6 / F7</span>
+                    <select aria-label="灯效睡眠时间" className="toggle-btn" value={keyboard.timerSec}
+                      disabled={vendorBusy} onChange={(event) => vendor.write('vendor_set_kb_timer', { seconds: Number(event.target.value) })}>
+                      {!timerPresets.includes(keyboard.timerSec) && <option value={keyboard.timerSec}>{formatKbTimer(keyboard.timerSec)}</option>}
+                      {timerPresets.map((sec) => <option key={sec} value={sec}>{formatKbTimer(sec)}</option>)}
+                    </select>
                   </div>
                 </div>
               </>
             )}
+            {vendor.service?.present && (
+              <div className="quick-row">
+                <div>
+                  <div className="sys-row-label">厂商通道</div>
+                  <div className="sys-row-desc">{keyboard ? '使用厂商后台控制背光，无需启动官方界面' : '尚未收到键盘状态；连接后可用秒级、分钟级和小时级档位'}</div>
+                </div>
+                <div className="sys-row-controls">
+                  {!keyboard && (
+                    <button type="button" className="toggle-btn" disabled={vendorBusy} onClick={() => vendor.connect()}>
+                      {vendor.busy ? '连接中…' : '连接'}
+                    </button>
+                  )}
+                  <button type="button" className="toggle-btn" disabled={vendorBusy}
+                    onClick={() => vendor.connect(!(vendor.service?.selected && vendor.service?.auto_start))}>
+                    {vendor.service.selected && vendor.service.auto_start ? '关闭常开' : '连接并常开'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {!keyboard && kbSleepSupported && !status.vendor_bus_selected && !vendor.service?.selected && (
+              <div className="quick-row">
+                <div>
+                  <div className="sys-row-label">背光休眠延时 <RevBadge variant="info">本地</RevBadge></div>
+                  <div className="sys-row-desc">本机固件支持的本地档位</div>
+                </div>
+                <div className="sys-row-controls">
+                  {kbTimeoutOptions.map((seconds) => (
+                    <button key={seconds} type="button" className={'toggle-btn ' + (kbTimeout === seconds ? 'active-indigo' : '')}
+                      disabled={kbTimeoutBusy} onClick={() => applyKbTimeout(seconds)}>
+                      {seconds === 0 ? '常亮' : seconds + 's'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {vendor.error && <div className="quick-row" role="alert">{vendor.error}</div>}
           </div>
         </div>
       )}

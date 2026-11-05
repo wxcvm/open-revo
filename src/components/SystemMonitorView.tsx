@@ -1,19 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Activity, Cpu, Fan, Gauge, HardDrive, Zap } from 'lucide-react';
 import { HardwareState, SystemStats } from '../types/hardware';
 import { RevTickBar, MeterTone } from './ui/RevTickBar';
-import { setVendorBusActive } from '../state/vendorBus';
-
-interface VendorMessagePayload {
-  topic: string;
-  payload: string;
-}
-
-interface VendorResponse {
-  messages: VendorMessagePayload[];
-  elapsed_ms: number;
-}
+import { parseFanBoost, useVendorControl } from '../state/vendorControl';
 
 interface SystemMonitorViewProps {
   status: HardwareState;
@@ -73,143 +63,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     };
   }, []);
 
-  const [vendorOnline, setVendorOnline] = useState(false);
-  const [vendorBoost, setVendorBoost] = useState<boolean | null>(null);
-  const [vendorBusy, setVendorBusy] = useState(false);
-  const [vendorLatency, setVendorLatency] = useState<number | null>(null);
-  const [vendorStackPresent, setVendorStackPresent] = useState(true);
-  const [vendorPersist, setVendorPersist] = useState<boolean>(() => {
-    try {
-      return window.localStorage.getItem('openrevo.vendorBusPersist') === '1';
-    } catch {
-      return false;
-    }
-  });
-  const vendorPending = useRef(false);
-  const vendorOnlineRef = useRef(false);
-
-  const applyVendorResponse = (response: VendorResponse) => {
-    setVendorLatency(response.elapsed_ms);
-    const statusMessage = response.messages.find((item) => item.topic === 'Fan/Status');
-    if (statusMessage) {
-      try {
-        const parsed = JSON.parse(statusMessage.payload) as { FanBoostEnable?: string };
-        setVendorBoost(parsed.FanBoostEnable === '1');
-      } catch {
-        setVendorBoost(null);
-      }
-    }
-    vendorOnlineRef.current = true;
-    setVendorOnline(true);
-    setVendorBusActive(true);
-  };
-
-  useEffect(() => {
-    void invoke<boolean>('vendor_stack_present')
-      .then((present) => setVendorStackPresent(present))
-      .catch(() => setVendorStackPresent(true));
-  }, []);
-
-  const refreshVendorBus = async (): Promise<boolean> => {
-    if (vendorPending.current) return vendorOnlineRef.current;
-    vendorPending.current = true;
-    try {
-      const response = await invoke<VendorResponse>('vendor_bus_probe');
-      applyVendorResponse(response);
-      return true;
-    } catch {
-      vendorOnlineRef.current = false;
-      setVendorOnline(false);
-      setVendorBoost(null);
-      setVendorBusActive(false);
-      return false;
-    } finally {
-      vendorPending.current = false;
-    }
-  };
-
-  const setVendorPersistMode = async (enabled: boolean) => {
-    setVendorPersist(enabled);
-    try {
-      window.localStorage.setItem('openrevo.vendorBusPersist', enabled ? '1' : '0');
-    } catch {
-      /* storage may be unavailable */
-    }
-    try {
-      await invoke<boolean>('vendor_set_service_persistent', { enabled });
-      if (enabled) {
-        await invoke<boolean>('vendor_ensure_service');
-        await refreshVendorBus();
-      }
-    } catch (error) {
-      console.error('Failed to switch vendor service mode:', error);
-    }
-  };
-
-  const connectVendorService = async () => {
-    if (vendorBusy) return;
-    setVendorBusy(true);
-    try {
-      const started = await invoke<boolean>('vendor_ensure_service');
-      if (started) {
-        await refreshVendorBus();
-      }
-    } catch {
-      vendorOnlineRef.current = false;
-      setVendorOnline(false);
-    } finally {
-      setVendorBusy(false);
-    }
-  };
-
-  const toggleVendorBoost = async () => {
-    if (vendorBusy) return;
-    setVendorBusy(true);
-    try {
-      const response = await invoke<VendorResponse>('vendor_fan_boost', { enabled: !(vendorBoost ?? false) });
-      applyVendorResponse(response);
-      const status = response.messages.find((message) => message.topic === 'Fan/Status');
-      if (status) {
-        const parsed = JSON.parse(status.payload) as { FanBoostEnable?: string };
-        setVendorBoost(parsed.FanBoostEnable === '1');
-      }
-    } catch {
-      vendorOnlineRef.current = false;
-      setVendorOnline(false);
-    } finally {
-      setVendorBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    let stopped = false;
-    let timer = 0;
-    const tick = async () => {
-      if (stopped) return;
-      if (document.visibilityState === 'visible') {
-        await refreshVendorBus();
-      }
-      if (stopped) return;
-      // 在线 6 s 一轮，离线退避到 30 s，避免空转与无谓的服务调用
-      timer = window.setTimeout(tick, vendorOnlineRef.current ? 15000 : 30000);
-    };
-    void (async () => {
-      if (vendorPersist) {
-        try {
-          await invoke<boolean>('vendor_ensure_service');
-        } catch {
-          /* best effort */
-        }
-        await refreshVendorBus();
-      }
-    })();
-    void tick();
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-      setVendorBusActive(false);
-    };
-  }, []);
+  const vendor = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
+  const vendorBoost = vendor.snapshot?.value;
+  const boost = vendorBoost ?? (status.vendor_bus_selected ? undefined : status.fan_boost);
 
   const cpuUsage = clampPct(status.cpu_usage ?? 0);
   const cpuFreq = status.cpu_freq ?? 0;
@@ -429,7 +285,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
             <div className="mon-row-head">
               <span className="mon-row-label">处理器</span>
               <span className="mon-row-value">
-                {cpuFan > 0 ? `${cpuFan} RPM · ${Math.round(cpuFanPct)}%` : '-- RPM'}
+                {cpuFan > 0 ? `${cpuFan} RPM · 约 ${Math.round(cpuFanPct)}%` : '-- RPM'}
               </span>
             </div>
             <RevTickBar value={cpuFanPct} />
@@ -447,69 +303,55 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
           <div className="mon-plain">
             <span className="mon-plain-label">散热策略</span>
-            <span className="mon-plain-value">{status.fan_boost ? '强冷 / 全速' : '智能曲线'}</span>
+            <span className="mon-plain-value">{boost === undefined ? '未确认' : boost ? '强冷 / 全速' : '智能曲线'}</span>
           </div>
 
           <div className="mon-plain">
             <span className="mon-plain-label">厂商通道</span>
-            <span className={vendorOnline ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
-              {vendorOnline
-                ? `在线 · localhost:13688 · ${vendorLatency ?? '--'} ms`
-                : vendorStackPresent
-                  ? '离线（GCUBridge 未运行）'
-                  : '官方控制中心已卸载'}
+            <span className={vendor.snapshot ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
+              {vendor.snapshot ? `在线 · ${vendor.snapshot.latency} ms`
+                : vendor.service?.present ? '离线或未收到风扇状态'
+                : vendor.service ? '未安装厂商后台' : '正在检查…'}
             </span>
           </div>
 
-          {vendorOnline && (
+          {vendor.snapshot && (
             <div className="mon-plain">
               <span className="mon-plain-label">强冷</span>
               <button
                 type="button"
                 className={`toggle-btn ${vendorBoost ? 'active-emerald' : ''}`}
-                onClick={toggleVendorBoost}
-                disabled={vendorBusy}
+                onClick={() => vendor.write('vendor_fan_boost', { enabled: !vendorBoost })}
+                disabled={vendor.busy || vendor.checking}
               >
                 {vendorBoost ? '已开启' : '已关闭'}
               </button>
             </div>
           )}
 
-          {!vendorOnline && (
+          {vendor.service?.present && (
             <div className="mon-plain">
-              <span className="mon-plain-label">连接</span>
-              {vendorStackPresent ? (
-                <>
-                  <button
-                    type="button"
-                    className="toggle-btn"
-                    onClick={connectVendorService}
-                    disabled={vendorBusy}
-                  >
-                    {vendorBusy ? '启动中…' : '连接厂商通道'}
-                  </button>
-                  <button
-                    type="button"
-                    className={'toggle-btn ' + (vendorPersist ? 'active-emerald' : '')}
-                    onClick={() => setVendorPersistMode(!vendorPersist)}
-                    disabled={vendorBusy}
-                    title="让 GCUBridge 随系统自动启动，厂商通道不再被回收"
-                  >
-                    {vendorPersist ? '常开已启用' : '常开'}
-                  </button>
-                </>
-              ) : (
-                <span style={{ fontSize: '11px', color: 'var(--status-warn)' }}>
-                  未安装
-                </span>
+              <span className="mon-plain-label">厂商后台</span>
+              {!vendor.snapshot && (
+                <button type="button" className="toggle-btn" disabled={vendor.busy || vendor.checking}
+                  onClick={() => vendor.connect()}>
+                  {vendor.busy ? '启动中…' : '连接厂商通道'}
+                </button>
               )}
+              <button type="button" className={'toggle-btn ' + (vendor.service.selected && vendor.service.auto_start ? 'active-emerald' : '')}
+                disabled={vendor.busy || vendor.checking}
+                title="随系统启动；在监控或设置页可见时尝试恢复断开的通道"
+                onClick={() => vendor.connect(!(vendor.service?.selected && vendor.service?.auto_start))}>
+                {vendor.service.selected && vendor.service.auto_start ? '关闭常开' : '连接并常开'}
+              </button>
             </div>
           )}
+          {vendor.error && <div className="mon-plain" role="alert">{vendor.error}</div>}
 
           <div className="mon-plain">
             <span className="mon-plain-label">转速调节</span>
             <span className="mon-plain-value">
-              {vendorOnline
+              {vendor.snapshot
                 ? '厂商总线（强冷）'
                 : fanControllable
                   ? '本机型可调（电源管理 → 风扇曲线）'

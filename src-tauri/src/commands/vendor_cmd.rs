@@ -11,7 +11,6 @@ use serde::Serialize;
 use crate::system::vendor_bus::{self, BusMessage};
 
 static LAST_LATENCY_MS: AtomicU64 = AtomicU64::new(0);
-static ACTION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[derive(Serialize)]
 pub struct VendorMessage {
@@ -40,7 +39,10 @@ where
     F: FnOnce() -> Result<Vec<BusMessage>, String> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = ACTION_LOCK.lock();
+        let _mode = vendor_bus::CONTROL_MODE_LOCK.lock();
+        if crate::system::config::load_config().takeover_oem {
+            return Err("当前为本地接管模式；请先连接厂商通道".into());
+        }
         let started = Instant::now();
         let result = work();
         LAST_LATENCY_MS.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
@@ -48,9 +50,21 @@ where
             // 现场排错：把失败原因落到 APPDATA，便于不打扰用户地定位
             if let Ok(appdata) = std::env::var("APPDATA") {
                 use std::io::Write as _;
-                let path = std::path::Path::new(&appdata).join("OpenRevo").join("vendor-diag.log");
-                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                    let _ = writeln!(file, "[{:?}] {} ms: {}", std::time::SystemTime::now(), started.elapsed().as_millis(), error);
+                let path = std::path::Path::new(&appdata)
+                    .join("OpenRevo")
+                    .join("vendor-diag.log");
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(
+                        file,
+                        "[{:?}] {} ms: {}",
+                        std::time::SystemTime::now(),
+                        started.elapsed().as_millis(),
+                        error
+                    );
                 }
             }
         }
@@ -64,29 +78,29 @@ where
 }
 
 #[tauri::command]
-pub async fn vendor_bus_probe() -> Result<VendorResponse, String> {
-    run_blocking(vendor_bus::probe).await
+pub async fn vendor_probe_fan() -> Result<VendorResponse, String> {
+    run_blocking(vendor_bus::probe_fan).await
 }
 
 #[tauri::command]
-pub async fn vendor_is_available() -> bool {
-    tauri::async_runtime::spawn_blocking(vendor_bus::is_available)
-        .await
-        .unwrap_or(false)
+pub async fn vendor_probe_keyboard() -> Result<VendorResponse, String> {
+    run_blocking(vendor_bus::probe_keyboard).await
 }
 
 #[tauri::command]
-pub async fn vendor_ensure_service() -> bool {
-    tauri::async_runtime::spawn_blocking(vendor_bus::ensure_service)
+pub async fn vendor_connect_service(
+    persistent: Option<bool>,
+) -> Result<vendor_bus::VendorServiceState, String> {
+    tauri::async_runtime::spawn_blocking(move || vendor_bus::connect_service(persistent))
         .await
-        .unwrap_or(false)
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub async fn vendor_set_service_persistent(enabled: bool) -> bool {
-    tauri::async_runtime::spawn_blocking(move || vendor_bus::set_service_persistent(enabled))
+pub async fn vendor_recover_service() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(vendor_bus::recover_service)
         .await
-        .unwrap_or(false)
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -151,11 +165,8 @@ pub async fn vendor_set_kb_backlight(enabled: bool) -> Result<VendorResponse, St
 }
 
 #[tauri::command]
-pub fn vendor_service_state() -> vendor_bus::VendorServiceState {
-    vendor_bus::service_state()
-}
-
-#[tauri::command]
-pub fn vendor_stack_present() -> bool {
-    vendor_bus::vendor_stack_present()
+pub async fn vendor_service_state() -> Result<vendor_bus::VendorServiceState, String> {
+    tauri::async_runtime::spawn_blocking(vendor_bus::service_state)
+        .await
+        .map_err(|error| error.to_string())
 }

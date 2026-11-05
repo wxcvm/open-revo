@@ -751,7 +751,13 @@ pub fn get_keyboard_sleep_timeout() -> u32 {
 #[tauri::command]
 pub fn set_keyboard_sleep_timeout(seconds: u32, app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Emitter;
+    let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK
+        .try_lock()
+        .ok_or("厂商通道正在处理命令，请稍后再试")?;
     let mut cfg = crate::system::config::load_config();
+    if cfg.use_vendor_bus && !cfg.takeover_oem {
+        return Err("请在系统设置中使用厂商通道设置背光延时".into());
+    }
     cfg.keyboard_sleep_timeout = seconds;
     crate::system::config::save_config(&cfg);
 

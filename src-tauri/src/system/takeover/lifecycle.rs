@@ -93,6 +93,7 @@ pub fn pause_oem_services() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         crate::log_info!("TAKEOVER", "=== Initiating OEM Service Takeover Sequence (Pause) ===");
+        crate::system::vendor_bus::disconnect();
 
         // 1. Neutralize autostart Run registry keys
         neutralize_run_keys();
