@@ -170,3 +170,10 @@ pub async fn vendor_service_state() -> Result<vendor_bus::VendorServiceState, St
         .await
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub async fn vendor_restart_service() -> Result<vendor_bus::VendorServiceState, String> {
+    tauri::async_runtime::spawn_blocking(vendor_bus::restart_service)
+        .await
+        .map_err(|error| error.to_string())?
+}

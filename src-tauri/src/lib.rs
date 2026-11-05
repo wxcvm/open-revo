@@ -168,6 +168,7 @@ pub fn run() {
             commands::sysinfo_cmd::get_system_stats,
             commands::vendor_cmd::vendor_service_state,
             commands::vendor_cmd::vendor_connect_service,
+            commands::vendor_cmd::vendor_restart_service,
             commands::vendor_cmd::vendor_recover_service,
             commands::vendor_cmd::vendor_probe_fan,
             commands::vendor_cmd::vendor_probe_keyboard,

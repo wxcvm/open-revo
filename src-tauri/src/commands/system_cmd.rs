@@ -19,6 +19,7 @@ pub use crate::system::power_mode::{FactoryPowerPresets, get_factory_power_prese
 pub struct HardwareState {
     pub power_mode: u8,
     pub fan_boost: bool,
+    pub fan_boost_known: bool,
     pub battery_limit: u8,
     pub cpu_temp: i32,
     pub cpu_usage: u32,
@@ -32,6 +33,7 @@ pub struct HardwareState {
     pub gpu_mem_freq: u32,
     pub gpu_vram_mb: u64,
     pub gpu_vram_used_mb: u64,
+    pub gpu_memory_usage_available: bool,
     pub refresh_rate: u32,
     pub available_refresh_rates: Vec<u32>,
     pub monitors: Vec<crate::system::display::DisplayMonitor>,
@@ -111,10 +113,20 @@ pub fn collect_hardware_state(
         crate::commands::power_cmd::check_dgpu_present()
     };
 
+    let engine_usage = if query_gpu { crate::system::gpu_engine::sample_usage() } else { 0 };
+    let mut gpu_memory_usage_available = is_discrete_gpu_supported;
     let (gpu_temp, nvapi_gpu_usage, gpu_core_freq, gpu_mem_freq, gpu_vram_mb, gpu_vram_used_mb, gpu_power_w, gpu_name, has_gpu) = {
         if !is_discrete_gpu_supported {
-            // Declarative Decision Center Authority: strictly pure iGPU / thin & light laptop, no dGPU
-            (0, 0, 0, 0, 0, 0, 0.0, "".to_string(), false)
+            if query_gpu {
+                let sample = crate::system::gpu_telemetry::sample(crate::system::gpu_engine::graphics_node);
+                let usage = crate::system::gpu_engine::shared_memory_mb(&sample.memory_instance);
+                gpu_memory_usage_available = usage.is_some();
+                (sample.temperature, 0, sample.core_mhz, sample.memory_mhz, sample.shared_total_mb,
+                    usage.unwrap_or(0), 0.0, sample.name, false)
+            } else {
+                gpu_memory_usage_available = false;
+                (0, 0, 0, 0, 0, 0, 0.0, crate::driver::gpu_bridge::get_gpu_name_cached(), false)
+            }
         } else if query_gpu {
             let gpu = gpu_state.lock();
             let count = gpu.get_gpu_count();
@@ -143,7 +155,6 @@ pub fn collect_hardware_state(
     // (e.g. Ryzen AI 9 HX 365 + Radeon 880M) utilisation comes from PDH GPU Engine counters,
     // so the 系统监控 显卡 card never stays pinned at 0 %.
     let gpu_usage = if query_gpu {
-        let engine_usage = crate::system::gpu_engine::sample_usage();
         let is_nvidia = gpu_name.to_ascii_uppercase().contains("NVIDIA");
         if is_nvidia {
             nvapi_gpu_usage
@@ -162,10 +173,16 @@ pub fn collect_hardware_state(
     let autostart_enabled = autostart::is_autostart_enabled();
 
     let cfg = crate::system::config::load_config();
+    let support_flags = crate::driver::wmi_ec::get_hardware_support_flags();
+    let vendor_selected = cfg.use_vendor_bus && !cfg.takeover_oem;
+    let observed = if vendor_selected { crate::system::vendor_bus::observed_fan_boost() } else { None };
+    let fan_boost_known = if vendor_selected { observed.is_some() } else { support_flags.has_fan_boost };
+    let fan_boost = observed.unwrap_or(fan_boost);
 
     HardwareState {
         power_mode,
         fan_boost,
+        fan_boost_known,
         battery_limit,
         cpu_temp,
         cpu_usage: cpu.get_usage(),
@@ -179,6 +196,7 @@ pub fn collect_hardware_state(
         gpu_mem_freq,
         gpu_vram_mb,
         gpu_vram_used_mb,
+        gpu_memory_usage_available,
         refresh_rate: display::get_refresh_rate(),
         available_refresh_rates: display::get_available_refresh_rates(),
         monitors: display::get_all_monitors(),
@@ -196,7 +214,7 @@ pub fn collect_hardware_state(
         autostart: autostart_enabled,
         is_intel_13_14_gen,
         water_cooler_enabled: crate::system::config::is_water_cooler_enabled(),
-        support_flags: crate::driver::wmi_ec::get_hardware_support_flags(),
+        support_flags,
         cpu_name: cpu.get_brand(),
         gpu_name,
         model_name: get_machine_model(),

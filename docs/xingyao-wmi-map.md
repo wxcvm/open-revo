@@ -1,7 +1,7 @@
 # XINGYAO / Strix Point 机型 WMI 通道实测（读命令全表）
 
 > 目标：判断 open-revo 能否在这台 XINGYAO Series（AMD Ryzen AI 9 HX 365 + Radeon 880M，STX_BIOS 1.15）上实现
-> 风扇调速、键盘背光档位、显卡模式切换。结论：**当前 WMI 邮箱没有写入通道**，详见第 3 节。
+> 风扇调速、键盘背光档位、显卡模式切换。结论：**已登记的 WMI 通道能读取转速，并有功耗模式、背光休眠的机型配置；尚无已验证的直接风扇调速/强冷写入映射**，详见第 3、6 节。
 
 ## 1. 通道形态
 
@@ -72,3 +72,17 @@ UI（`CCU.WinUI.msix` → `CCUWinUI.dll`）与服务的通信是 WCF：
 ## 5. 复现脚本（只读，可反复运行）
 
 见 `docs/probe-oemwmi.ps1`（随本文件提交），输出与第 2 节一致。
+
+
+## 6. 2026-11-05 复核：独立监控与控制缺口
+
+- AMD Radeon 880M 的温度、3D 节点频率、内存频率可以通过 Windows WDDM
+  `D3DKMTQueryAdapterInfo` 读取，共享显存用量来自按适配器 LUID 选择的 PDH
+  `GPU Adapter Memory / Shared Usage`，无需 GCUBridge、GCUService 或 AMD SDK。
+- 本机 manifest 已有 `set_power_mode`、`set_kb_sleep_timeout`，因此不能概括为
+  “WMI 完全没有写通道”；但这不等于有直接强冷/风扇曲线/任意分钟背光控制。
+- 厂商服务静态检查确认 GCUService 1.0.2.70 为 .NET Framework 4.8 程序。
+  现有反编译中的关键风扇方法仍是运行时保护占位，尚未获得本机直接强冷写入帧。
+  不把其他模具的 EC 地址或 IOCTL 硬套到 XINGYAO。
+- 真机 A/B：服务强冷标记可从 0 → 1 → 0，物理 RPM 约 3200 且没有随标记明显升高。
+  本轮没有把服务标记等同于物理强冷成功；具体样本记录在本地 validation 日志中。

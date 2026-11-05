@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 interface VendorServiceState {
   present: boolean;
   selected: boolean;
+  running: boolean;
   auto_start: boolean;
 }
 
@@ -80,7 +81,7 @@ export function useVendorControl<T>(
               if (disposed) return;
               next = await read(probe);
             }
-            if (!disposed) setSnapshot(next);
+            if (!disposed) { setSnapshot(next); setError(''); }
             interval = 15_000;
           } else {
             setSnapshot(null);
@@ -132,6 +133,11 @@ export function useVendorControl<T>(
           throw failure;
         }
       }
+    }),
+    restart: () => run(async () => {
+      setSnapshot(null);
+      setService(await invoke<VendorServiceState>('vendor_restart_service'));
+      setSnapshot(await read(probe));
     }),
     write: (command: string, args: Record<string, unknown>) => run(async () => {
       setSnapshot(await read(command, args));

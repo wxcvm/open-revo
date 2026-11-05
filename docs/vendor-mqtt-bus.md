@@ -1,7 +1,7 @@
 # 厂商控制总线（AiStone MQTT）实测
 
 > 机型：MECHREVO XINGYAO Series（Ryzen AI 9 HX 365 + Radeon 880M，STX_BIOS 1.15）
-> 目的：在 WMI 邮箱没有写通道（见 `xingyao-wmi-map.md`）的机型上，找到官方风扇/背光/模式的真实控制面。
+> 目的：在尚无直接风扇写入映射（见 `xingyao-wmi-map.md`）的机型上，找到官方风扇/背光/模式的真实控制面。
 
 ## 1. 总线
 
@@ -101,3 +101,15 @@ RESTORE_FAN_SPEED_CURVE_SETTING_ALL
   只有选择了厂商模式且启用常开，才会对确认已停止的后台尝试恢复；不创建重启任务，
   不保证不稳定的 OEM 进程始终存活。
 - 厂商通道是现有 Windows OEM 服务的兼容路径，不代表已经实现无厂商依赖的硬件写入。
+
+
+## 9. 2026-11-05 真机复核
+
+- broker 接受客户端身份不代表控制进程会处理它的命令。测试客户端
+  `UWPClient_9` 可以完成连接却未得到设备状态；官方身份的同协议只读测试以及
+  OpenRevo 生产 Rust 模块均读到了 `Fan/Status` 和 `Setting/Status`。
+- 仅重启 GCUBridge 会遗留独立 GCUService 进程；界面新增的「重启后台」是显式操作：
+  停 broker 后核实 GCUService 的完整安装路径，只结束对应工作进程，再启动后台。
+  不停止 ACPI 驱动、不恢复官方 UI，不在自动轮询中终止工作进程。
+- 强冷 A/B 测试能读回 0→1→0；实际风扇在约 3200 RPM 附近，开启阶段 12 秒没有明显升高。
+  因此 UI 使用「强冷请求」，不把服务确认标记当作风扇已达到全速。

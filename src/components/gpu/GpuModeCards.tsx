@@ -138,6 +138,24 @@ export const GpuModeCards: React.FC<GpuModeCardsProps> = ({
     onCardClick(mode);
   };
 
+  if (gpuInfo.has_dgpu === false) {
+    return (
+      <section className="gpu-native-section">
+        <div className="sys-sub-panel gpu-native-card">
+          <Cpu size={26} className="gpu-native-icon" />
+          <div className="gpu-native-copy">
+            <h2>核显与显示</h2>
+            <div className="gpu-native-name">{gpuInfo.gpu_name || '集成显卡'}</div>
+            <p>本机由核显直出，无独立显卡和 MUX 开关，无需切换显卡模式。</p>
+            <p>下方可调整屏幕亮度、色彩与 ICC 配置。</p>
+          </div>
+          <span className="gpu-native-badge">原生核显</span>
+        </div>
+        {notice && <NoticeBanner notice={notice} onClose={onDismissNotice} />}
+      </section>
+    );
+  }
+
   // ─── Card renderer ────────────────────────────────────────────────────────
 
   const renderCard = (

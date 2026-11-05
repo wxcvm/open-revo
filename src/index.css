@@ -3501,3 +3501,16 @@ body,
   color: #a78bfa;
   box-shadow: 0 0 12px rgba(167, 139, 250, 0.22);
 }
+
+
+/* Physical iGPU-only display page: one accurate architecture summary. */
+.gpu-native-section { display: flex; flex-direction: column; gap: 12px; }
+.gpu-native-card { display: flex; flex-direction: row; text-align: left; align-items: center; gap: 16px; padding: 20px; }
+.gpu-native-copy { flex: 1; min-width: 0; }
+.gpu-native-copy h2 { margin: 0 0 8px; font-size: 18px; color: var(--text-primary); }
+.gpu-native-name { font-weight: 600; color: var(--text-secondary); overflow-wrap: anywhere; }
+.gpu-native-copy p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.gpu-native-icon { flex-shrink: 0; color: var(--status-info); }
+.gpu-native-badge { flex-shrink: 0; border-radius: var(--radius-md); padding: 6px 10px; background: var(--status-ok-dim); color: var(--status-ok); }
+[data-theme="mono"] .gpu-native-icon, [data-theme="mono"] .gpu-native-badge { color: var(--text-primary); }
+@media (max-width: 680px) { .gpu-native-card { flex-wrap: wrap; } }

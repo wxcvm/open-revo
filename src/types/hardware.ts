@@ -11,6 +11,7 @@ export interface DisplayMonitor {
 
 export interface HardwareState {
   power_mode: number;         // 1: Office, 2: Balance, 3: Beast, 4: Custom
+  fan_boost_known?: boolean;
   fan_boost: boolean;        // true if max fan
   battery_limit: number;      // 80 or 100
   cpu_temp: number;          // °C
@@ -24,6 +25,7 @@ export interface HardwareState {
   gpu_core_freq: number;     // MHz
   gpu_mem_freq: number;      // MHz
   gpu_vram_mb: number;       // MB
+  gpu_memory_usage_available?: boolean;
   gpu_vram_used_mb: number;  // MB
   refresh_rate: number;      // Hz (e.g. 60, 240)
   available_refresh_rates?: number[]; // Supported display frequencies (e.g. [30, 48, 60, 75, 100, 120] or [60, 144, 240])

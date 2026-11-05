@@ -81,7 +81,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const gpuVramPct = gpuVramTotal > 0 ? clampPct((gpuVramUsed / gpuVramTotal) * 100) : 0;
   const gpuTemp = status.gpu_temp ?? 0;
   // 核显机型（如 Ryzen AI 9 HX 365 + Radeon 880M）没有 NVAPI 显存总量，隐藏显存行
-  const hasDedicatedVram = gpuVramTotal > 0;
+  const hasDedicatedVram = gpuVramTotal > 0 && (fanControllable || /NVIDIA|RADEON RX/i.test(status.gpu_name ?? ''));
 
   const mem = stats?.mem;
   const memPct = clampPct(mem?.usage ?? 0);
@@ -277,7 +277,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
               <span>风扇转速</span>
             </div>
             <div className="mon-card-tag">
-              {cpuFan === 0 && gpuFan === 0 ? 'EC 未映射' : `上限 ${fanCeiling} RPM`}
+              {cpuFan === 0 && gpuFan === 0 ? 'EC 未映射' : `${maxFanRpm ? '上限' : '参考'} ${fanCeiling} RPM`}
             </div>
           </div>
 
@@ -303,30 +303,34 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
           <div className="mon-plain">
             <span className="mon-plain-label">散热策略</span>
-            <span className="mon-plain-value">{boost === undefined ? '未确认' : boost ? '强冷 / 全速' : '智能曲线'}</span>
+            <span className="mon-plain-value">{boost === undefined ? '未确认' : boost ? (status.vendor_bus_selected ? '强冷请求已开启' : '强冷 / 全速') : '自动温控'}</span>
           </div>
 
           <div className="mon-plain">
             <span className="mon-plain-label">厂商通道</span>
             <span className={vendor.snapshot ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
               {vendor.snapshot ? `在线 · ${vendor.snapshot.latency} ms`
-                : vendor.service?.present ? '离线或未收到风扇状态'
+                : vendor.service?.present ? (vendor.service.running ? '后台运行中 · 尚未收到风扇状态' : '厂商后台未运行')
                 : vendor.service ? '未安装厂商后台' : '正在检查…'}
             </span>
           </div>
 
           {vendor.snapshot && (
             <div className="mon-plain">
-              <span className="mon-plain-label">强冷</span>
+              <span className="mon-plain-label">厂商强冷请求</span>
               <button
                 type="button"
                 className={`toggle-btn ${vendorBoost ? 'active-emerald' : ''}`}
                 onClick={() => vendor.write('vendor_fan_boost', { enabled: !vendorBoost })}
                 disabled={vendor.busy || vendor.checking}
               >
-                {vendorBoost ? '已开启' : '已关闭'}
+                {vendorBoost ? '请求已开启' : '请求已关闭'}
               </button>
             </div>
+          )}
+
+          {vendor.snapshot && (
+            <div className="sys-row-desc">状态来自厂商服务回执，不代表风扇已经达到全速；实际效果请对照上方转速。</div>
           )}
 
           {vendor.service?.present && (
@@ -336,6 +340,12 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
                 <button type="button" className="toggle-btn" disabled={vendor.busy || vendor.checking}
                   onClick={() => vendor.connect()}>
                   {vendor.busy ? '启动中…' : '连接厂商通道'}
+                </button>
+              )}
+              {!vendor.snapshot && vendor.service.running && (
+                <button type="button" className="toggle-btn" disabled={vendor.busy || vendor.checking}
+                  onClick={() => vendor.restart()} title="仅重启已核实的厂商服务和控制进程，不恢复官方界面">
+                  重启后台
                 </button>
               )}
               <button type="button" className={'toggle-btn ' + (vendor.service.selected && vendor.service.auto_start ? 'active-emerald' : '')}
@@ -352,7 +362,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
             <span className="mon-plain-label">转速调节</span>
             <span className="mon-plain-value">
               {vendor.snapshot
-                ? '厂商总线（强冷）'
+                ? '厂商强冷请求（由固件执行）'
                 : fanControllable
                   ? '本机型可调（电源管理 → 风扇曲线）'
                   : 'EC 自动（未接入调速协议）'}

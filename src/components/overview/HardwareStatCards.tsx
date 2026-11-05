@@ -18,7 +18,7 @@ function formatCpuShort(brand?: string): string {
 }
 
 function formatGpuShort(name?: string, isPureIgpu?: boolean): string {
-  if (!name || isPureIgpu) return isPureIgpu ? 'Core Graphics (iGPU)' : 'GPU';
+  if (!name) return isPureIgpu ? '集成显卡 (iGPU)' : 'GPU';
   let s = name
     .replace(/NVIDIA\s+GeForce\s+/gi, '')
     .replace(/\s+Laptop\s+GPU/gi, '')
@@ -35,6 +35,10 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
   const isPureIgpu = capabilities ? capabilities.discrete_gpu === false : !status.gpu_name;
 
   const isApuOrIgpu = isPureIgpu;
+  const memoryKnown = status.gpu_memory_usage_available ?? status.gpu_vram_mb > 0;
+  const memoryPercent = memoryKnown && status.gpu_vram_mb > 0
+    ? Math.min(100, Math.round(status.gpu_vram_used_mb / status.gpu_vram_mb * 100)) : null;
+  const fanKnown = status.fan_boost_known !== false;
 
   return (
     <div className="telemetry-cards-grid" data-slot="telemetry-grid">
@@ -73,7 +77,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
 
             <div style={{ display: 'flex', alignItems: 'baseline' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 700, color: '#818cf8', lineHeight: 1 }}>
-                {status.cpu_freq > 0 ? status.cpu_freq : 2200}
+                {status.cpu_freq > 0 ? status.cpu_freq : '--'}
               </span>
               <span style={{ fontSize: '10.5px', color: 'var(--text-dim)', fontWeight: 500, marginLeft: '2px' }}>MHz</span>
             </div>
@@ -274,7 +278,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               color: status.fan_boost ? '#fb7185' : '#38bdf8',
             }}
           >
-            {status.fan_boost ? '一键强冷' : '自动温控'}
+            {!fanKnown ? '状态未确认' : status.fan_boost ? (status.vendor_bus_selected ? '强冷请求' : '一键强冷') : '自动温控'}
           </span>
         </div>
       </div>
@@ -304,7 +308,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               {status.gpu_vram_mb > 0 && status.gpu_vram_mb < 1024 ? (
                 <>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '21px', fontWeight: 800, color: '#fff', lineHeight: 1 }}>
-                    {status.gpu_vram_used_mb > 0 ? status.gpu_vram_used_mb : 256}
+                    {memoryKnown ? status.gpu_vram_used_mb : '--'}
                   </span>
                   <span style={{ fontSize: '10.5px', color: 'var(--text-dim)', fontWeight: 500, marginLeft: '2px' }}>
                     / {status.gpu_vram_mb} MB
@@ -313,14 +317,14 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               ) : (
                 <>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '21px', fontWeight: 800, color: '#fff', lineHeight: 1 }}>
-                    {status.gpu_vram_used_mb > 0 ? (status.gpu_vram_used_mb / 1024).toFixed(1) : '1.2'}
+                    {memoryKnown ? (status.gpu_vram_used_mb / 1024).toFixed(1) : '--'}
                   </span>
                   <span style={{ fontSize: '10.5px', color: 'var(--text-dim)', fontWeight: 500, marginLeft: '2px' }}>
                     / {status.gpu_vram_mb > 0
                       ? (status.gpu_vram_mb % 1024 === 0
                         ? `${Math.round(status.gpu_vram_mb / 1024)}`
                         : (status.gpu_vram_mb / 1024).toFixed(1))
-                      : '16'} GB
+                      : '--'} GB
                   </span>
                 </>
               )}
@@ -330,7 +334,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
 
             <div style={{ display: 'flex', alignItems: 'baseline' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 700, color: '#c084fc', lineHeight: 1 }}>
-                {status.gpu_mem_freq > 0 ? status.gpu_mem_freq : 405}
+                {status.gpu_mem_freq > 0 ? status.gpu_mem_freq : '--'}
               </span>
               <span style={{ fontSize: '10.5px', color: 'var(--text-dim)', fontWeight: 500, marginLeft: '2px' }}>MHz</span>
             </div>
@@ -342,7 +346,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               style={{
                 height: '100%',
                 borderRadius: '2px',
-                width: `${status.gpu_vram_mb > 0 && status.gpu_vram_used_mb > 0 ? Math.min(100, Math.round((status.gpu_vram_used_mb / status.gpu_vram_mb) * 100)) : 8}%`,
+                width: `${memoryPercent ?? 0}%`,
                 background: 'linear-gradient(90deg, #9333ea, #c084fc)',
               }}
             />
@@ -369,7 +373,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               flexShrink: 0,
             }}
           >
-            {status.gpu_vram_mb > 0 && status.gpu_vram_used_mb > 0 ? Math.round((status.gpu_vram_used_mb / status.gpu_vram_mb) * 100) : 8}%
+            {memoryPercent === null ? '--' : `${memoryPercent}%`}
           </span>
         </div>
       </div>

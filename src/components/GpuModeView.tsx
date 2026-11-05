@@ -85,6 +85,7 @@ export const GpuModeView: React.FC = () => {
         if (res) {
           setGpuInfo(res);
           if (res.error) setNotice({ type: 'warning', text: `硬件读取提示: ${res.error}` });
+          else setNotice((previous) => previous?.text.startsWith('硬件读取提示:') ? null : previous);
         }
       })
       .catch((e) => {

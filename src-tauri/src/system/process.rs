@@ -290,3 +290,49 @@ pub fn get_running_oem_processes() -> Vec<(String, u32)> {
     procs
 }
 
+
+/// Stop only the verified AiStone worker after its broker service has stopped.
+/// A bridge-only restart can leave this interactive worker holding a dead session.
+pub fn stop_vendor_worker() -> Result<(), String> {
+    use windows::core::PWSTR;
+    use windows::Win32::System::Threading::{
+        QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    };
+    let expected = r"C:\Program Files\OEM\机械革命控制中心\AiStoneService\MyControlCenter\GCUService.exe";
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).map_err(|e| e.to_string())?;
+        let result: Result<(), String> = (|| {
+            let mut entry = PROCESSENTRY32W::default();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            if Process32FirstW(snapshot, &mut entry).is_err() { return Ok(()); }
+            loop {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                if String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case("GCUService.exe") {
+                    let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE, false, entry.th32ProcessID)
+                        .map_err(|e| format!("无法访问厂商控制进程：{e}"))?;
+                    let stopped: Result<(), String> = (|| {
+                        let mut path = vec![0u16; 32768];
+                        let mut len = path.len() as u32;
+                        QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), PWSTR(path.as_mut_ptr()), &mut len)
+                            .map_err(|e| format!("无法核实厂商控制进程路径：{e}"))?;
+                        if !String::from_utf16_lossy(&path[..len as usize]).eq_ignore_ascii_case(expected) {
+                            return Err("厂商控制进程路径与已知安装位置不同，未终止进程".into());
+                        }
+                        TerminateProcess(handle, 0).map_err(|e| format!("无法停止厂商控制进程：{e}"))?;
+                        if WaitForSingleObject(handle, 5000).0 != 0 {
+                            return Err("厂商控制进程未在 5 秒内退出".into());
+                        }
+                        Ok(())
+                    })();
+                    let _ = CloseHandle(handle);
+                    stopped?;
+                }
+                if Process32NextW(snapshot, &mut entry).is_err() { break; }
+            }
+            Ok(())
+        })();
+        let _ = CloseHandle(snapshot);
+        result
+    }
+}

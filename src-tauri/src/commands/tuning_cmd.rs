@@ -50,7 +50,6 @@ pub fn get_gpu_mode_info(
     gpu_state: State<'_, SharedGpuBridge>,
 ) -> GpuModeInfo {
     let mut cfg = crate::system::config::load_config();
-    let hw = crate::driver::uefi_nvram::read_gpu_mode();
     let capabilities = crate::driver::uefi_nvram::probe_gpu_capabilities();
     let has_igpu = check_igpu_present();
     let has_dgpu = if let Some(manifest) = crate::hal::declarative::load_matched_manifest() {
@@ -58,6 +57,25 @@ pub fn get_gpu_mode_info(
     } else {
         check_dgpu_present()
     };
+    if !has_dgpu {
+        let (cpu_name, is_amd) = crate::driver::uefi_nvram::get_cpu_info();
+        let native = crate::system::gpu_telemetry::sample(crate::system::gpu_engine::graphics_node);
+        return GpuModeInfo {
+            current_mode: "igpu".into(),
+            has_igpu_present: has_igpu,
+            has_dgpu: false,
+            gpu_name: if native.name.is_empty() { capabilities.gpu_name.clone() } else { native.name },
+            cpu_guard_active: cfg.cpu_safety_guard,
+            platform: if is_amd { "amd" } else { "intel" }.into(),
+            cpu_name,
+            // There is no physical MUX to read. Missing gaming-laptop NVRAM is
+            // expected here, not a hardware error.
+            hardware_read: false,
+            error: None,
+            capabilities,
+        };
+    }
+    let hw = crate::driver::uefi_nvram::read_gpu_mode();
     let gpu_name = gpu_state.lock().get_name(0);
 
     let effective_mode = if !has_dgpu {

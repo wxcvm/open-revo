@@ -28,9 +28,42 @@ const GET_STATUS: &str = r#"{"Action":"GETSTATUS"}"#;
 
 pub static CONTROL_MODE_LOCK: Mutex<()> = Mutex::new(());
 static CLIENT: Mutex<Option<BusClient>> = Mutex::new(None);
+static FAN_OBSERVED: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
+pub fn observed_fan_boost() -> Option<bool> {
+    FAN_OBSERVED
+        .lock()
+        .as_ref()
+        .and_then(|(at, value)| (at.elapsed() < Duration::from_secs(30)).then_some(*value))
+}
+
+fn cache_fan_result(result: Result<Vec<BusMessage>, String>) -> Result<Vec<BusMessage>, String> {
+    *FAN_OBSERVED.lock() = result.as_ref().ok().and_then(|messages| {
+        messages.iter().rev().find_map(|msg| {
+            if msg.topic != FAN_STATUS {
+                return None;
+            }
+            let json = serde_json::from_str(&msg.payload).ok()?;
+            Some((Instant::now(), fan_boost_status(&json)?))
+        })
+    });
+    result
+}
+
+fn missing_status_error(topic: &str) -> String {
+    let feature = if topic == FAN_STATUS {
+        "风扇"
+    } else if topic == SETTING_STATUS {
+        "键盘"
+    } else {
+        "设备"
+    };
+    format!("厂商后台已连接，但未返回可确认的{feature}状态；尚不能确认操作是否生效")
+}
 
 pub(super) fn disconnect() {
     *CLIENT.lock() = None;
+    *FAN_OBSERVED.lock() = None;
 }
 
 fn encode_len(mut len: usize, out: &mut Vec<u8>) {
@@ -253,7 +286,7 @@ impl BusClient {
         self.send(control, payload)?;
         self.receive(topic, accept)?
             .map(|msg| vec![msg])
-            .ok_or_else(|| format!("no confirmed {topic} reply"))
+            .ok_or_else(|| missing_status_error(topic))
     }
 
     fn write_verified(
@@ -323,11 +356,11 @@ fn is_available() -> bool {
 }
 
 pub fn probe_fan() -> Result<Vec<BusMessage>, String> {
-    with_client(|client| {
+    cache_fan_result(with_client(|client| {
         client.request("Fan/Control", GET_STATUS, FAN_STATUS, |json| {
             fan_boost_status(json).is_some()
         })
-    })
+    }))
 }
 
 pub fn probe_keyboard() -> Result<Vec<BusMessage>, String> {
@@ -374,11 +407,11 @@ pub fn set_fan_boost(enabled: bool) -> Result<Vec<BusMessage>, String> {
         "FAN_BOOST_OFF"
     };
     let payload = format!("{{\"Action\":\"{action}\"}}");
-    with_client(|client| {
+    cache_fan_result(with_client(|client| {
         client.write_verified("Fan/Control", &payload, FAN_STATUS, |json| {
             fan_boost_status(json) == Some(enabled)
         })
-    })
+    }))
 }
 
 pub fn set_operating_mode(mode: u8) -> Result<Vec<BusMessage>, String> {
@@ -445,6 +478,7 @@ pub fn restore_fan_curve() -> Result<Vec<BusMessage>, String> {
 pub struct VendorServiceState {
     pub present: bool,
     pub selected: bool,
+    pub running: bool,
     pub auto_start: bool,
 }
 
@@ -471,6 +505,9 @@ pub fn service_state() -> VendorServiceState {
     }
     VendorServiceState {
         present: true,
+        running: sc(&["query", "GCUBridge"]).is_ok_and(|out| {
+            out.status.success() && String::from_utf8_lossy(&out.stdout).contains("RUNNING")
+        }),
         selected: cfg.use_vendor_bus && !cfg.takeover_oem,
         auto_start: String::from_utf8_lossy(&info.stdout).contains("AUTO_START"),
     }
@@ -537,6 +574,40 @@ pub fn connect_service(persistent: Option<bool>) -> Result<VendorServiceState, S
         crate::system::config::modify_config(|cfg| cfg.select_vendor_control(true));
     }
     Ok(service_state())
+}
+
+/// Explicit user action only. Automatic reconnect never terminates a running worker.
+pub fn restart_service() -> Result<VendorServiceState, String> {
+    let _guard = CONTROL_MODE_LOCK.lock();
+    if !service_exists("GCUBridge") {
+        return Err("未安装厂商后台服务".into());
+    }
+    disconnect();
+    let stopped = sc(&["stop", "GCUBridge"])?;
+    if !matches!(stopped.status.code(), Some(0 | 1062)) {
+        return Err("无法停止厂商后台；请稍后重试".into());
+    }
+    let result = (|| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = sc(&["query", "GCUBridge"])?;
+            if String::from_utf8_lossy(&status.stdout).contains("STOPPED") {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err("厂商后台未在 10 秒内停止".into());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        crate::system::process::stop_vendor_worker()?;
+        ensure_service()?;
+        crate::system::config::modify_config(|cfg| cfg.select_vendor_control(true));
+        Ok(service_state())
+    })();
+    if result.is_err() {
+        let _ = start_service("GCUBridge");
+    }
+    result
 }
 
 pub fn recover_service() -> Result<(), String> {
@@ -658,7 +729,7 @@ mod tests {
         );
         assert_eq!(
             result.err().as_deref(),
-            Some("no confirmed Setting/Status reply")
+            Some(missing_status_error(SETTING_STATUS).as_str())
         );
         drop(client);
         worker.join().unwrap();

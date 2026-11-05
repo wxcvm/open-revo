@@ -483,6 +483,11 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                       {vendor.busy ? '连接中…' : '连接'}
                     </button>
                   )}
+                  {!keyboard && vendor.service.running && (
+                    <button type="button" className="toggle-btn" disabled={vendorBusy} onClick={() => vendor.restart()}>
+                      重启后台
+                    </button>
+                  )}
                   <button type="button" className="toggle-btn" disabled={vendorBusy}
                     onClick={() => vendor.connect(!(vendor.service?.selected && vendor.service?.auto_start))}>
                     {vendor.service.selected && vendor.service.auto_start ? '关闭常开' : '连接并常开'}
