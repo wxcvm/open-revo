@@ -102,6 +102,20 @@ export function useVendorControl<T>(
     };
   }, [probe, read]);
 
+  // A broker can accept MQTT before its separate hardware worker is ready.
+  // Only explicit connect/restart waits here; normal refresh stays bounded.
+  const readWhenReady = async () => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      try {
+        return await read(probe);
+      } catch (failure) {
+        if (Date.now() >= deadline) throw failure;
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+      }
+    }
+  };
+
   const run = async (work: () => Promise<void>) => {
     if (pending.current) return;
     pending.current = true;
@@ -127,7 +141,7 @@ export function useVendorControl<T>(
       setService(await invoke<VendorServiceState>('vendor_connect_service', { persistent }));
       if (persistent !== false) {
         try {
-          setSnapshot(await read(probe));
+          setSnapshot(await readWhenReady());
         } catch (failure) {
           setSnapshot(null);
           throw failure;
@@ -137,7 +151,7 @@ export function useVendorControl<T>(
     restart: () => run(async () => {
       setSnapshot(null);
       setService(await invoke<VendorServiceState>('vendor_restart_service'));
-      setSnapshot(await read(probe));
+      setSnapshot(await readWhenReady());
     }),
     write: (command: string, args: Record<string, unknown>) => run(async () => {
       setSnapshot(await read(command, args));
