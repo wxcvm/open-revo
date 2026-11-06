@@ -76,6 +76,11 @@ impl DeclarativeHardwareDriver {
 
 impl MechrevoHardwareHAL for DeclarativeHardwareDriver {
     fn set_performance_mode(&self, mode: HardwarePowerMode) -> Result<(), HalError> {
+        if self.manifest.id == crate::hal::vault::xingyao::MODEL_ID {
+            crate::hal::xingyao::set_mode(mode as u8).map_err(HalError::RegisterAccessFailed)?;
+            self.last_power_mode.store(mode as u8, Ordering::SeqCst);
+            return Ok(());
+        }
         let mode_key = match mode {
             HardwarePowerMode::Office => "office",
             HardwarePowerMode::Balance => "balance",
@@ -267,6 +272,9 @@ impl MechrevoHardwareHAL for DeclarativeHardwareDriver {
     }
 
     fn read_fan_rpm(&self) -> Result<(u16, u16), HalError> {
+        if self.manifest.id == crate::hal::vault::xingyao::MODEL_ID {
+            return crate::hal::xingyao::read_fans().map_err(HalError::RegisterAccessFailed);
+        }
         if let Some(ActionDef::BufferInvoke { input, parse, .. }) =
             self.manifest.actions.get("read_fan_rpm")
         {
@@ -374,6 +382,11 @@ impl HardwareDriver for DeclarativeHardwareDriver {
     }
 
     fn get_performance_mode(&self) -> Result<HardwarePowerMode, HalError> {
+        if self.manifest.id == crate::hal::vault::xingyao::MODEL_ID {
+            return crate::hal::xingyao::read_mode()
+                .map(|mode| if mode == 3 { HardwarePowerMode::Turbo } else { HardwarePowerMode::Balance })
+                .map_err(HalError::RegisterAccessFailed);
+        }
         for channel in self.manifest.channels.values() {
             if matches!(channel, ChannelDef::WmiIp3) {
                 if let Some(raw) = crate::driver::wmi_ip3::ip3_get_power_mode() {

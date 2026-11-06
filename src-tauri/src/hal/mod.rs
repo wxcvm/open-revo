@@ -7,6 +7,8 @@ pub mod mock;
 pub mod platform_probe;
 pub mod traits;
 pub mod vault;
+pub mod xingyao;
+pub mod xingyao_protocol;
 
 pub use declarative::DeclarativeHardwareDriver;
 pub use driver_impl::MechrevoHALImpl;

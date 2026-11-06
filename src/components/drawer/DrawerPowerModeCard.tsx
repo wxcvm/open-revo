@@ -51,7 +51,7 @@ export const DrawerPowerModeCard: React.FC<DrawerPowerModeCardProps> = ({
       </div>
 
       <div className={hasCustomMode ? "m-grid-4" : "m-grid-3"}>
-        <button
+        {(!capabilities?.power_modes || capabilities.power_modes.includes('office')) && <button
           className="m-btn-action"
           style={
             status.power_mode === 1
@@ -67,7 +67,7 @@ export const DrawerPowerModeCard: React.FC<DrawerPowerModeCardProps> = ({
         >
           <Shield size={14} />
           <span style={{ fontSize: '10.5px', fontWeight: 600 }}>办公</span>
-        </button>
+        </button>}
 
         <button
           className="m-btn-action"

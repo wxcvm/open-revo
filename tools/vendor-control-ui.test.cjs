@@ -17,6 +17,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 import React from '/node_modules/.vite/deps/react.js';
 import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
 import { useVendorControl, parseFanBoost } from '/src/state/vendorControl.ts';
+import { SystemSettingsView } from '/src/components/SystemSettingsView.tsx';
+import { ModeSelector } from '/src/components/ModeSelector.tsx';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 function Fixture() {
   const control = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
@@ -25,6 +27,15 @@ function Fixture() {
 }
 window.mount = () => root.render(React.createElement(React.StrictMode, null, React.createElement(Fixture)));
 window.unmount = () => root.render(null);
+window.mountNative = () => root.render(React.createElement(React.Fragment, null,
+  React.createElement(SystemSettingsView, {
+    status: {vendor_bus_selected:false},
+    capabilities: {power_modes:['balance','turbo'], rgb_keyboard: {
+      sleep_timeout_supported:true, timeout_options_seconds:[0,10,15,20,30,45,60,120,300,600,1200,1800,3600,7200,10800]}},
+    osdConfig:{enabled:false,theme:'fade',scale:'1',position:'top-left'}, onUpdateOsdConfig(){},onToggleAutostart(){}
+  }),
+  React.createElement(ModeSelector, {currentMode:3,onSelectMode(){}, capabilities:{power_modes:['balance','turbo']}})
+));
 window.mount();
 </script></body></html>`);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
@@ -34,10 +45,15 @@ window.mount();
     await page.route('**/fixture.html', route => route.fulfill({ contentType: 'text/html', body: html }));
     await page.addInitScript(() => {
       const f = window.fixture = { calls: [], running: true, failProbe: true, failWrite: false, boost: false,
-        deferConnect: false, deferProbe: false, probeReleases: [] };
-      window.__TAURI_INTERNALS__ = { async invoke(name) {
+        deferConnect: false, deferProbe: false, probeReleases: [], selected:true, timer:600 };
+      window.__TAURI_INTERNALS__ = { transformCallback() {return 1;}, async invoke(name, args) {
         f.calls.push(name);
-        const state = () => ({ present: true, selected: true, running: f.running, auto_start: true });
+        const state = () => ({ present: true, selected: f.selected, running: f.running, auto_start: true });
+        if (name === 'get_keyboard_sleep_timeout') return f.timer;
+        if (name === 'set_keyboard_sleep_timeout') {
+          if (f.failWrite) throw new Error('native readback mismatch');
+          f.timer = args.seconds; return;
+        }
         if (name === 'vendor_service_state') return state();
         if (name === 'vendor_connect_service') {
           if (f.deferConnect) await new Promise(resolve => { f.releaseConnect = resolve; });
@@ -52,8 +68,10 @@ window.mount();
           if (f.failWrite) throw new Error('write outcome unconfirmed');
           f.boost = !f.boost;
         }
-        return { messages: [{ topic: 'Fan/Status', payload: JSON.stringify({ FanBoostEnable: Number(f.boost) }) }], elapsed_ms: 8 };
+        if (name.startsWith('vendor_')) return { messages: [{ topic: 'Fan/Status', payload: JSON.stringify({ FanBoostEnable: Number(f.boost) }) }], elapsed_ms: 8 };
+        return null;
       } };
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {unregisterListener(){}};
     });
     await page.goto('http://127.0.0.1:1431/fixture.html');
     await page.waitForFunction(() => window.control?.service && !window.control.checking);
@@ -99,6 +117,25 @@ window.mount();
     await page.waitForFunction(() => window.control.snapshot && !window.control.checking && document.querySelector('pre'));
     assert.deepEqual(errors, []);
     console.log('PASS StrictMode remount: new lifetime receives its own snapshot and releases pending state');
+
+    const probes = await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_probe_keyboard').length);
+    await page.evaluate(() => {
+      window.fixture.selected=false; window.fixture.running=false; window.fixture.failWrite=false;
+      window.mountNative();
+    });
+    const timer = page.getByLabel('原生背光休眠延时');
+    await page.waitForFunction(() => document.querySelector('[aria-label="原生背光休眠延时"]')?.value === '600');
+    assert.equal(await timer.locator('option').count(), 15);
+    await timer.selectOption('1200');
+    await page.getByText('通过原生 WMI 直接设置，无需官方后台；已回读 20 分钟').waitFor();
+    await page.evaluate(() => {window.fixture.failWrite=true;});
+    await timer.selectOption('15');
+    await page.getByRole('alert').filter({hasText:'native readback mismatch'}).waitFor();
+    assert.equal(await timer.inputValue(), '1200');
+    assert.equal(await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_probe_keyboard').length), probes);
+    assert.equal(await page.getByRole('button', {name:/办公/}).count(), 0);
+    console.log('PASS native UI: 15 timeout options, confirmed values only, two physical modes, no OEM probes');
+    assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
     await dev.close();

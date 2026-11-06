@@ -11,6 +11,12 @@ It tests verified writes without replay, missing replies versus broken framing,
 bounded packet lengths, fragmented TCP, subscription refusal and clean disconnect.
 Timing-sensitive socket cases run serially, with the same deadlines as production.
 
+The same crate also imports the P916F-STX production native protocol codec:
+16-bit little-endian timer encoding, verified readback, two physical performance
+codes, SPFM command-echo acknowledgements and rejection of invalid/error responses.
+Live independent validation and its limitations are documented in
+`docs/P916F-STX-NATIVE.md`.
+
 ## UI lifetime
 
 Run `npm run test:vendor-ui` with Playwright available to Node and its Chromium

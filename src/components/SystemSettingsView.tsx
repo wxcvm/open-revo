@@ -61,8 +61,9 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
 
   const kbSleepSupported = Boolean(capabilities?.rgb_keyboard?.sleep_timeout_supported);
   const kbTimeoutOptions = capabilities?.rgb_keyboard?.timeout_options_seconds ?? [0, 10, 30, 60];
-  const [kbTimeout, setKbTimeout] = useState<number>(0);
+  const [kbTimeout, setKbTimeout] = useState<number | null>(null);
   const [kbTimeoutBusy, setKbTimeoutBusy] = useState(false);
+  const [kbTimeoutError, setKbTimeoutError] = useState('');
 
   useEffect(() => {
     if (!kbSleepSupported) return;
@@ -70,10 +71,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     let unlisten: (() => void) | undefined;
     invoke<number>('get_keyboard_sleep_timeout')
       .then((value) => {
-        if (!disposed) setKbTimeout(typeof value === 'number' ? value : 0);
+        if (!disposed) { setKbTimeout(typeof value === 'number' ? value : null); setKbTimeoutError(''); }
       })
-      .catch(() => {
-        if (!disposed) setKbTimeout(0);
+      .catch((error) => {
+        if (!disposed) { setKbTimeout(null); setKbTimeoutError(String(error)); }
       });
     listen<number>('keyboard-sleep-timeout-changed', (event) => {
       if (!disposed) setKbTimeout(event.payload);
@@ -87,7 +88,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
       disposed = true;
       unlisten?.();
     };
-  }, [kbSleepSupported]);
+  }, [kbSleepSupported, status.vendor_bus_selected]);
 
   const applyKbTimeout = async (seconds: number) => {
     if (kbTimeoutBusy) return;
@@ -95,8 +96,10 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     try {
       await invoke('set_keyboard_sleep_timeout', { seconds });
       setKbTimeout(seconds);
+      setKbTimeoutError('');
     } catch (error) {
       console.error('Failed to set keyboard sleep timeout:', error);
+      setKbTimeoutError(String(error));
     } finally {
       setKbTimeoutBusy(false);
     }
@@ -499,18 +502,19 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
               <div className="quick-row">
                 <div>
                   <div className="sys-row-label">背光休眠延时 <RevBadge variant="info">本地</RevBadge></div>
-                  <div className="sys-row-desc">本机固件支持的本地档位</div>
+                    <div className="sys-row-desc">通过原生 WMI 直接设置，无需官方后台；{kbTimeout === null ? '尚未取得硬件状态' : `已回读 ${formatKbTimer(kbTimeout)}`}</div>
                 </div>
                 <div className="sys-row-controls">
-                  {kbTimeoutOptions.map((seconds) => (
-                    <button key={seconds} type="button" className={'toggle-btn ' + (kbTimeout === seconds ? 'active-indigo' : '')}
-                      disabled={kbTimeoutBusy} onClick={() => applyKbTimeout(seconds)}>
-                      {seconds === 0 ? '常亮' : seconds + 's'}
-                    </button>
-                  ))}
+                    <select aria-label="原生背光休眠延时" className="toggle-btn" value={kbTimeout ?? ''}
+                      disabled={kbTimeoutBusy} onChange={(event) => applyKbTimeout(Number(event.target.value))}>
+                      {kbTimeout === null && <option value="" disabled>状态未确认</option>}
+                      {kbTimeout !== null && !kbTimeoutOptions.includes(kbTimeout) && <option value={kbTimeout}>{formatKbTimer(kbTimeout)}</option>}
+                      {kbTimeoutOptions.map((seconds) => <option key={seconds} value={seconds}>{formatKbTimer(seconds)}</option>)}
+                    </select>
                 </div>
               </div>
             )}
+              {kbTimeoutError && !status.vendor_bus_selected && <div className="quick-row" role="alert">{kbTimeoutError}</div>}
             {vendor.error && <div className="quick-row" role="alert">{vendor.error}</div>}
           </div>
         </div>

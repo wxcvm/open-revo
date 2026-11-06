@@ -141,6 +141,16 @@ pub fn apply_full_power_mode(ui_mode: u8) {
 
     crate::log_info!("POWER_MODE", "=== Apply Full Power Mode: UI Mode {} ===", ui_mode);
 
+    if crate::hal::xingyao::is_active() {
+        // Internal sleep/tray "office" requests use the board's balanced profile.
+        // Never fall through to unrelated Tongfang EC writes or OEM JSON syncing.
+        let mode = if ui_mode == 1 { 2 } else { ui_mode };
+        if let Err(error) = crate::hal::xingyao::set_mode(mode) {
+            crate::log_warn!("POWER_MODE", "Native mode request not confirmed: {}", error);
+        }
+        return;
+    }
+
     // 1. Windows OS Energy Scheduler (Power Overlay Scheme)
     apply_windows_power_overlay(ui_mode);
 
@@ -286,9 +296,18 @@ pub fn spawn_hardware_state_restore(ec_for_restore: crate::driver::ec_bridge::Sh
                 4 => crate::hal::HardwarePowerMode::Custom,
                 _ => crate::hal::HardwarePowerMode::Balance,
             };
-            let _ = hal.set_performance_mode(hw_mode);
-            ec_for_restore.lock().set_power_mode_from_hardware(effective_power_mode);
-            crate::log_info!("POWER_RESTORE", "Thin & light startup power mode applied via HAL: {:?}", hw_mode);
+            match hal.set_performance_mode(hw_mode) {
+                Ok(()) => {
+                    ec_for_restore.lock().set_power_mode_from_hardware(effective_power_mode);
+                    crate::log_info!("POWER_RESTORE", "Thin & light startup power mode applied via HAL: {:?}", hw_mode);
+                }
+                Err(error) => crate::log_warn!("POWER_RESTORE", "Native mode restore not confirmed: {}", error),
+            }
+            if crate::hal::xingyao::is_active() {
+                if let Err(error) = crate::hal::xingyao::set_timer(cfg.keyboard_sleep_timeout) {
+                    crate::log_warn!("POWER_RESTORE", "Native keyboard timer restore not confirmed: {}", error);
+                }
+            }
 
             // Restore battery health limit via HAL if applicable
             let batt_mode = match cfg.battery_limit {

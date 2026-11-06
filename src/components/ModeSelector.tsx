@@ -27,7 +27,9 @@ export const ModeSelector: React.FC<ModeSelectorProps> = ({
   const isLight = isThinLight || capabilities?.form_factor === 'thin_light';
   const isUnadapted = capabilities?.is_adapted === false;
   const hasCustomMode = !isUnadapted && (capabilities?.power_modes ? capabilities.power_modes.includes('custom') : !isLight);
-  const availableModes = POWER_MODES.filter((m) => hasCustomMode || m.id !== 4);
+  const modeKeys = ['office', 'balance', 'turbo', 'custom'];
+  const availableModes = POWER_MODES.filter((m) => (hasCustomMode || m.id !== 4)
+    && (!capabilities?.power_modes || capabilities.power_modes.includes(modeKeys[m.id - 1])));
 
   const getIcon = (id: PowerMode) => {
     switch (id) {

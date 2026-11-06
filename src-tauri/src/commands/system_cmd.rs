@@ -1545,7 +1545,7 @@ pub fn get_model_capabilities() -> serde_json::Value {
         // If the ACPI driver is active and returns valid non-zero wattage, prioritize real hardware truth.
         let effective_pmw = {
             let mut watts_map = manifest.capabilities.power_mode_watts.clone().unwrap_or_default();
-            if crate::driver::wmi_ec::is_acpi_driver_available() {
+            if crate::hal::platform_probe::needs_acpi_kernel_driver() && crate::driver::wmi_ec::is_acpi_driver_available() {
                 let off_ec = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_OFFICE_PL1).unwrap_or(0);
                 let bal_ec = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_BALANCE_PL1).unwrap_or(0);
                 let tur_ec = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_TURBO_PL1).unwrap_or(0);

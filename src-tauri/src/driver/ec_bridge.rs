@@ -51,7 +51,7 @@ impl EcBridge {
         };
         let mut initial_cache = HardwareStateCache::default();
         initial_cache.power_mode = initial_mode;
-        initial_cache.fan_boost = if initial_cfg.fan_boost && wmi_ec::is_acpi_driver_available() {
+        initial_cache.fan_boost = if initial_cfg.fan_boost && crate::hal::platform_probe::needs_acpi_kernel_driver() && wmi_ec::is_acpi_driver_available() {
             wmi_ec::is_fan_boost_active()
         } else {
             false
@@ -88,19 +88,20 @@ impl EcBridge {
             ];
 
             loop {
-                if !wmi_ec::is_acpi_driver_available() {
+                if !crate::hal::platform_probe::needs_acpi_kernel_driver() || !wmi_ec::is_acpi_driver_available() {
                     let hal = crate::hal::get_hardware_driver();
                     if hal.kind() != crate::hal::DriverKind::TongfangAcpi && hal.is_hardware_supported() {
                         if let Ok((cpu_rpm, gpu_rpm)) = hal.read_fan_rpm() {
                             let mut c = cache_for_poller.lock();
-                            if cpu_rpm > 0 {
-                                c.cpu_fan_rpm = cpu_rpm;
-                            }
-                            if gpu_rpm > 0 {
-                                c.gpu_fan_rpm = gpu_rpm;
+                            c.cpu_fan_rpm = cpu_rpm;
+                            c.gpu_fan_rpm = gpu_rpm;
+                        }
+                        if crate::hal::xingyao::is_active() {
+                            if let Ok(mode) = hal.get_performance_mode() {
+                                cache_for_poller.lock().power_mode = mode as u8;
                             }
                         }
-                        // Ultrabooks do not possess autonomous physical rocker switches for power mode.
+                        // Other ultrabooks do not possess autonomous physical rocker switches for power mode.
                         // Performance mode on ultrabooks is managed authoritatively by OpenRevo software.
                         // We must NEVER let periodic background polling blindly overwrite c.power_mode,
                         // which caused the catastrophic 5-second mode revert back to Balance!
@@ -365,10 +366,11 @@ impl EcBridge {
         }
 
         thread::spawn(move || {
-            let is_tongfang_hardware = crate::driver::wmi_ec::is_acpi_driver_available()
+            let is_tongfang_hardware = crate::hal::platform_probe::needs_acpi_kernel_driver()
+                && (crate::driver::wmi_ec::is_acpi_driver_available()
                 || crate::hal::declarative::load_matched_manifest()
                     .map(|m| m.channels.values().any(|c| matches!(c, crate::hal::declarative::model_manifest::ChannelDef::AcpiIoctl { .. })))
-                    .unwrap_or(false);
+                    .unwrap_or(false));
 
             if !is_tongfang_hardware {
                 let health_mode = if limit >= 95 {

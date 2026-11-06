@@ -572,16 +572,22 @@ export default function App() {
   }, [fetchStatus]);
 
   // Power mode
+  const powerModePendingRef = useRef(false);
   const handleSetPowerMode = async (mode: PowerMode) => {
-    overrideLockRef.current.power_mode = { val: mode, expiry: Date.now() + 5000 };
-    setHardwareState((prev) => ({ ...prev, power_mode: mode }));
+    if (powerModePendingRef.current) return;
+    powerModePendingRef.current = true;
     if (isTauriEnv) {
       try {
         await invoke('set_power_mode', { mode });
       } catch (e) {
         console.error('Failed to set power mode:', e);
+        powerModePendingRef.current = false;
+        return;
       }
     }
+    overrideLockRef.current.power_mode = { val: mode, expiry: Date.now() + 5000 };
+    setHardwareState((prev) => ({ ...prev, power_mode: mode }));
+    powerModePendingRef.current = false;
   };
 
   // Fan Boost

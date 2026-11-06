@@ -229,7 +229,10 @@ unsafe fn query_instance_path(
                 }
 
                 let matches_candidate = CANDIDATE_INSTANCES.iter().any(|cand| inst_str.eq_ignore_ascii_case(cand));
-                if is_active || matches_candidate {
+                if is_active && matched_relpath.is_none() {
+                    matched_relpath = Some(target_path.clone());
+                }
+                if matches_candidate {
                     matched_relpath = Some(target_path);
                     break;
                 }

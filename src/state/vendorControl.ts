@@ -76,7 +76,7 @@ export function useVendorControl<T>(
           const nextService = await invoke<VendorServiceState>('vendor_service_state');
           if (disposed) return;
           setService(nextService);
-          if (nextService.present) {
+          if (nextService.present && nextService.selected) {
             let next;
             try {
               next = await read(probe);

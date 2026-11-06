@@ -743,9 +743,11 @@ pub fn get_custom_fx_text() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn get_keyboard_sleep_timeout() -> u32 {
-    let cfg = crate::system::config::load_config();
-    cfg.keyboard_sleep_timeout
+pub fn get_keyboard_sleep_timeout() -> Result<u32, String> {
+    if crate::hal::xingyao::is_active() {
+        return crate::hal::xingyao::read_timer();
+    }
+    Ok(crate::system::config::load_config().keyboard_sleep_timeout)
 }
 
 #[tauri::command]
@@ -758,22 +760,12 @@ pub fn set_keyboard_sleep_timeout(seconds: u32, app: tauri::AppHandle) -> Result
     if cfg.use_vendor_bus && !cfg.takeover_oem {
         return Err("请在系统设置中使用厂商通道设置背光延时".into());
     }
+    if !crate::hal::xingyao::is_active() {
+        return Err("当前机型尚未接入可回读的原生背光延时控制".into());
+    }
+    crate::hal::xingyao::set_timer(seconds)?;
     cfg.keyboard_sleep_timeout = seconds;
     crate::system::config::save_config(&cfg);
-
-    // If active model is Declarative (e.g. Xingyao 14), invoke WMI Mailbox
-    let hal = crate::hal::get_hardware_driver();
-    if hal.kind() != crate::hal::DriverKind::TongfangAcpi {
-        let cmd = if seconds == 0 {
-            // Always-on (Disable sleep timeout)
-            vec![0x03, 0x0C, 0x01, 0x00]
-        } else {
-            // Enable hardware power saving auto-timeout
-            vec![0x03, 0x0C, 0x00, 0x00]
-        };
-        crate::log_info!("LIGHTING", "Applying keyboard backlight sleep timeout ({}s) via WMI: {:?}", seconds, cmd);
-        let _ = crate::hal::declarative::invoke_raw_mailbox(&cmd);
-    }
 
     let _ = app.emit("keyboard-sleep-timeout-changed", seconds);
     let _ = app.emit_to("osd", "keyboard-sleep-timeout-changed", seconds);

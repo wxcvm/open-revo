@@ -142,6 +142,10 @@ pub fn raw_driver_read_ec(addr: u16) -> Option<u8> {
 
 /// Direct Win32 IOCTL call to \\.\ACPIDriver for single EC register write (with AcpiTest_MULong WMI fallback)
 pub fn raw_driver_write_ec(addr: u16, val: u8) -> bool {
+    // This board uses its firmware mailbox, not the installed legacy OEM driver.
+    if crate::hal::xingyao::is_active() {
+        return false;
+    }
     if is_acpi_driver_available() {
         unsafe {
             let name = crate::hal::vault::driver::get_driver_path_null_terminated();

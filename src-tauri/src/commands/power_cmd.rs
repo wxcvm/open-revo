@@ -253,10 +253,11 @@ pub fn set_power_mode(mode: u8, app: AppHandle, ec_state: State<'_, SharedEcBrid
         return Err(msg.to_string());
     }
     let is_declarative = crate::hal::declarative::load_matched_manifest().is_some();
-    let is_tongfang_acpi_channel = crate::driver::wmi_ec::is_acpi_driver_available()
+    let is_tongfang_acpi_channel = crate::hal::platform_probe::needs_acpi_kernel_driver()
+        && (crate::driver::wmi_ec::is_acpi_driver_available()
         || crate::hal::declarative::load_matched_manifest()
             .map(|m| m.channels.values().any(|c| matches!(c, crate::hal::declarative::model_manifest::ChannelDef::AcpiIoctl { .. })))
-            .unwrap_or(false);
+            .unwrap_or(false));
 
     if is_tongfang_acpi_channel {
         // Tongfang ODM models (both Gaming laptops and Thin & Lights like Wujie 14X/15X):
@@ -273,6 +274,7 @@ pub fn set_power_mode(mode: u8, app: AppHandle, ec_state: State<'_, SharedEcBrid
         };
         if let Err(e) = hal.set_performance_mode(hw_mode) {
             crate::log_warn!("POWER_CMD", "Direct HAL set_performance_mode failed: {}", e);
+            return Err(e.to_string());
         } else {
             crate::log_info!("POWER_CMD", "Direct HAL applied performance mode {:?}", hw_mode);
         }

@@ -303,13 +303,14 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
           <div className="mon-plain">
             <span className="mon-plain-label">散热策略</span>
-            <span className="mon-plain-value">{boost === undefined ? '未确认' : boost ? (status.vendor_bus_selected ? '强冷请求已开启' : '强冷 / 全速') : '自动温控'}</span>
+            <span className="mon-plain-value">{!status.vendor_bus_selected && status.support_flags?.has_fan_boost === false ? '固件自动温控' : boost === undefined ? '未确认' : boost ? (status.vendor_bus_selected ? '强冷请求已开启' : '强冷 / 全速') : '自动温控'}</span>
           </div>
 
           <div className="mon-plain">
             <span className="mon-plain-label">厂商通道</span>
             <span className={vendor.snapshot ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
               {vendor.snapshot ? `在线 · ${vendor.snapshot.latency} ms`
+                : vendor.service?.selected === false ? '未启用 · 当前使用本地硬件通道'
                 : vendor.service?.present ? (vendor.service.running ? '后台运行中 · 尚未收到风扇状态' : '厂商后台未运行')
                 : vendor.service ? '未安装厂商后台' : '正在检查…'}
             </span>

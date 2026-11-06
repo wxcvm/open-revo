@@ -278,7 +278,7 @@ export const HardwareStatCards: React.FC<HardwareStatCardsProps> = ({ status, ca
               color: status.fan_boost ? '#fb7185' : '#38bdf8',
             }}
           >
-            {!fanKnown ? '状态未确认' : status.fan_boost ? (status.vendor_bus_selected ? '强冷请求' : '一键强冷') : '自动温控'}
+            {!status.vendor_bus_selected && status.support_flags?.has_fan_boost === false ? '固件自动' : !fanKnown ? '状态未确认' : status.fan_boost ? (status.vendor_bus_selected ? '强冷请求' : '一键强冷') : '自动温控'}
           </span>
         </div>
       </div>

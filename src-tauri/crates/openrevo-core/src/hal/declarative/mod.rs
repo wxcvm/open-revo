@@ -8,6 +8,7 @@ pub mod wmi_mailbox;
 pub use driver::DeclarativeHardwareDriver;
 pub use model_manifest::ModelManifest;
 
+const BUILTIN_XINGYAO_STX: &str = include_str!("../../../../../resources/drivers/xingyao_14_p916f_stx.json");
 const BUILTIN_XINGYAO_14: &str = include_str!("../../../../../resources/drivers/xingyao_14_p916f.json");
 const BUILTIN_WUJIE_14_IP3: &str = include_str!("../../../../../resources/drivers/wujie_14_ip3.json");
 const BUILTIN_WUJIE_14_BLD: &str = include_str!("../../../../../resources/drivers/wujie_14_bld.json");
@@ -91,6 +92,13 @@ fn load_matched_manifest_internal() -> Option<ModelManifest> {
                             }
                         }
                     }
+                }
+            }
+
+            // Exact AMD board revision: do not apply its protocol to Intel P916F.
+            if let Ok(manifest) = serde_json::from_str::<ModelManifest>(BUILTIN_XINGYAO_STX) {
+                if manifest.matches_dmi(&board, &sys_prod) {
+                    return Some(manifest);
                 }
             }
 
