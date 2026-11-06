@@ -90,7 +90,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const fanCeiling = maxFanRpm && maxFanRpm > 0 ? maxFanRpm : DEFAULT_FAN_CEILING;
   const cpuFan = status.cpu_fan_rpm ?? 0;
   const gpuFan = status.gpu_fan_rpm ?? 0;
-  // 无独显的小型机（XINGYAO / Ryzen AI 9 这类）没有 GPU 风扇通道，隐藏该行避免 "-- RPM" 噪音
+  // Dual-fan iGPU models expose an auxiliary chassis fan, not a dedicated GPU fan.
   const hasGpuFanChannel = hasDedicatedVram || gpuFan > 0;
   const cpuFanPct = clampPct((cpuFan / fanCeiling) * 100);
   const gpuFanPct = clampPct((gpuFan / fanCeiling) * 100);
@@ -294,7 +294,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           {hasGpuFanChannel && (
             <div className="mon-row">
               <div className="mon-row-head">
-                <span className="mon-row-label">显卡</span>
+                <span className="mon-row-label">{hasDedicatedVram ? '显卡' : '辅助风扇'}</span>
                 <span className="mon-row-value">{gpuFan > 0 ? `${gpuFan} RPM` : '-- RPM'}</span>
               </div>
               <RevTickBar value={gpuFanPct} />
