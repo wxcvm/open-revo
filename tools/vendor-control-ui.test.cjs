@@ -19,6 +19,7 @@ import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
 import { useVendorControl, parseFanBoost } from '/src/state/vendorControl.ts';
 import { SystemSettingsView } from '/src/components/SystemSettingsView.tsx';
 import { ModeSelector } from '/src/components/ModeSelector.tsx';
+import { MiniDrawer } from '/src/components/MiniDrawer.tsx';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 function Fixture() {
   const control = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
@@ -36,6 +37,15 @@ window.mountNative = () => root.render(React.createElement(React.Fragment, null,
   }),
   React.createElement(ModeSelector, {currentMode:3,onSelectMode(){}, capabilities:{power_modes:['balance','turbo']}})
 ));
+window.mountMini = () => root.render(React.createElement(MiniDrawer, {
+  status:{power_mode:3,gpu_name:'AMD Radeon 880M',gpu_vram_mb:16020,gpu_vram_used_mb:2000,cpu_fan_rpm:3000,
+    vendor_bus_selected:false,support_flags:{has_battery_limit:false},available_refresh_rates:[60,120],monitors:[]},
+  capabilities:{id:'mechrevo_xingyao_14_p916f_stx',form_factor:'thin_light',discrete_gpu:false,
+    power_modes:['balance','turbo'],battery_charge_limit:false,rgb_keyboard:{supported:false,sleep_timeout_supported:true,
+      timeout_options_seconds:[0,10,15,20,30,45,60,120,300,600,1200,1800,3600,7200,10800]}},
+  onSetPowerMode(){},onToggleFanBoost(){},onToggleBatteryLimit(){},onSwitchRefreshRate(){},onToggleWinKey(){},
+  onToggleAutostart(){},async onToggleOemService(){},onExpandDashboard(){},onOpenSponsor(){},onMinimize(){},onClose(){}
+}));
 window.mount();
 </script></body></html>`);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
@@ -135,6 +145,18 @@ window.mount();
     assert.equal(await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_probe_keyboard').length), probes);
     assert.equal(await page.getByRole('button', {name:/办公/}).count(), 0);
     console.log('PASS native UI: 15 timeout options, confirmed values only, two physical modes, no OEM probes');
+    await page.evaluate(() => {window.fixture.timer=600; window.fixture.failWrite=false; window.mountMini();});
+    const miniTimer = page.getByLabel('迷你面板原生背光延时');
+    await page.waitForFunction(() => document.querySelector('[aria-label="迷你面板原生背光延时"]')?.value === '600');
+    assert.equal(await page.locator('[data-slot="battery"]').count(), 0);
+    assert.equal(await miniTimer.locator('option').count(), 15);
+    await miniTimer.selectOption('1200');
+    await page.waitForFunction(() => !document.querySelector('[aria-label="迷你面板原生背光延时"]').disabled);
+    await page.evaluate(() => {window.fixture.failWrite=true;});
+    await miniTimer.selectOption('15');
+    await page.getByRole('alert').filter({hasText:'native readback mismatch'}).waitFor();
+    assert.equal(await miniTimer.inputValue(),'1200');
+    console.log('PASS mini UI: unsupported charging controls hidden; native timer has all presets and rejects false success');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

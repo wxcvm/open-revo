@@ -219,14 +219,14 @@ export const MiniDrawer: React.FC<MiniDrawerProps> = ({
 
 
         {/* 第 6 排：电池健康 */}
-        <div className="mini-slot-battery" data-slot="battery">
+        {status.support_flags?.has_battery_limit !== false && capabilities?.battery_charge_limit !== false && <div className="mini-slot-battery" data-slot="battery">
           <DrawerBatteryCard
             status={status}
             onToggleBatteryLimit={onToggleBatteryLimit}
             checkOemGuard={checkOemGuard}
             onExpandDashboard={onExpandDashboard}
           />
-        </div>
+        </div>}
 
         {/* 第 7 排：快捷开关矩阵 */}
         <div className="mini-slot-switches" data-slot="switches">

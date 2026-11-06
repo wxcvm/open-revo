@@ -630,15 +630,16 @@ export default function App() {
         nextLimit = 80;
       }
     }
-    overrideLockRef.current.battery_limit = { val: nextLimit, expiry: Date.now() + 4000 };
-    setHardwareState((prev) => ({ ...prev, battery_limit: nextLimit }));
     if (isTauriEnv) {
       try {
         await invoke('set_battery_limit', { limit: nextLimit });
       } catch (e) {
         console.error('Failed to set battery limit:', e);
+        return;
       }
     }
+    overrideLockRef.current.battery_limit = { val: nextLimit, expiry: Date.now() + 4000 };
+    setHardwareState((prev) => ({ ...prev, battery_limit: nextLimit }));
   };
 
   // Refresh rate

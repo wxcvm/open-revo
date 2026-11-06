@@ -347,6 +347,9 @@ pub fn set_fan_boost(
 
 #[tauri::command]
 pub fn set_battery_limit(limit: u8, ec_state: State<'_, SharedEcBridge>) -> Result<(), String> {
+    if !crate::driver::wmi_ec::get_hardware_support_flags().has_battery_limit {
+        return Err("当前机型尚未接入充电上限控制".into());
+    }
     ec_state.lock().set_battery_limit(limit);
     let mut cfg = crate::system::config::load_config();
     cfg.battery_limit = limit;

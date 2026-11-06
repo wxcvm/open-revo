@@ -98,7 +98,9 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
   const [showKbdModeMenu, setShowKbdModeMenu] = useState(false);
   const [showKbdColorMenu, setShowKbdColorMenu] = useState(false);
   const [showKbdBrightMenu, setShowKbdBrightMenu] = useState(false);
-  const [sleepTimeout, setSleepTimeout] = useState<number>(0);
+  const [sleepTimeout, setSleepTimeout] = useState<number | null>(null);
+  const [sleepBusy, setSleepBusy] = useState(false);
+  const [sleepError, setSleepError] = useState('');
 
   useEffect(() => {
     invoke<number>('get_keyboard_sleep_timeout')
@@ -121,11 +123,18 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
     };
   }, []);
 
-  const handleSetTimeout = (sec: number) => {
-    setSleepTimeout(sec);
-    invoke('set_keyboard_sleep_timeout', { seconds: sec }).catch((err) =>
-      console.warn('Set keyboard sleep timeout error:', err)
-    );
+  const handleSetTimeout = async (sec: number) => {
+    if (sleepBusy) return;
+    setSleepBusy(true);
+    try {
+      await invoke('set_keyboard_sleep_timeout', { seconds: sec });
+      setSleepTimeout(sec);
+      setSleepError('');
+    } catch (error) {
+      setSleepError(String(error));
+    } finally {
+      setSleepBusy(false);
+    }
   };
 
 
@@ -411,7 +420,17 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
           </div>
         </div>
 
-        <div className="m-grid-4">
+        {capabilities?.id === 'mechrevo_xingyao_14_p916f_stx' ? (
+          <select aria-label="迷你面板原生背光延时" className="toggle-btn" value={sleepTimeout ?? ''}
+            disabled={sleepBusy || status?.vendor_bus_selected} onChange={(event) => handleSetTimeout(Number(event.target.value))}>
+            {sleepTimeout === null && <option value="" disabled>状态未确认</option>}
+            {sleepTimeout !== null && !capabilities.rgb_keyboard?.timeout_options_seconds?.includes(sleepTimeout)
+              && <option value={sleepTimeout}>{sleepTimeout} 秒</option>}
+            {capabilities.rgb_keyboard?.timeout_options_seconds?.map((seconds) => <option key={seconds} value={seconds}>
+              {seconds === 0 ? '常亮' : seconds % 3600 === 0 ? `${seconds / 3600} 小时` : seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`}
+            </option>)}
+          </select>
+        ) : <div className="m-grid-4">
           {[
             { label: '常亮', sec: 0 },
             { label: '10秒', sec: 10 },
@@ -420,6 +439,7 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
           ].map((item) => (
             <button
               key={item.sec}
+              disabled={sleepBusy}
               className="m-btn-action"
               style={
                 sleepTimeout === item.sec
@@ -437,7 +457,8 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
               <span style={{ fontSize: '11px', fontWeight: 600 }}>{item.label}</span>
             </button>
           ))}
-        </div>
+        </div>}
+        {sleepError && <div className="sys-row-desc" role="alert">{sleepError}</div>}
       </div>
     );
   }
