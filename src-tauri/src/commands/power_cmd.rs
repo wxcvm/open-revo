@@ -315,13 +315,19 @@ pub fn set_fan_boost(
     enable: bool,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<(), String> {
+    let _mode = crate::system::vendor_bus::CONTROL_MODE_LOCK
+        .try_lock()
+        .ok_or("控制通道正在切换，请稍后重试")?;
+    let mut cfg = crate::system::config::load_config();
+    if cfg.use_vendor_bus {
+        return Err("当前为厂商通道模式；请通过厂商强冷请求控制".into());
+    }
     let support_flags = crate::driver::wmi_ec::get_hardware_support_flags();
     if !support_flags.has_fan_boost {
         crate::log_info!("POWER_CMD", "Fan boost is not supported on this platform.");
-        return Ok(());
+        return Err("当前机型尚未接入本地强冷控制".into());
     }
     ec_state.lock().set_fan_boost(enable);
-    let mut cfg = crate::system::config::load_config();
     cfg.fan_boost = enable;
     crate::system::config::save_config(&cfg);
     crate::update_tray_fan_boost(enable);

@@ -47,7 +47,8 @@ export function useVendorControl<T>(
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
-  const pending = useRef(false);
+  const pending = useRef<symbol | null>(null);
+  const lifetime = useRef(0);
 
   const read = useCallback(async (command: string, args?: Record<string, unknown>) => {
     const res = await invoke<VendorResponse>(command, args);
@@ -58,13 +59,18 @@ export function useVendorControl<T>(
   }, [topic, parse]);
 
   useEffect(() => {
+    const currentLifetime = ++lifetime.current;
+    pending.current = null;
+    setBusy(false);
+    setChecking(false);
     let disposed = false;
     let timer = 0;
     const tick = async () => {
       if (disposed) return;
       let interval = 30_000;
       if (document.visibilityState === 'visible' && !pending.current) {
-        pending.current = true;
+        const operation = Symbol();
+        pending.current = operation;
         setChecking(true);
         try {
           const nextService = await invoke<VendorServiceState>('vendor_service_state');
@@ -75,7 +81,8 @@ export function useVendorControl<T>(
             try {
               next = await read(probe);
             } catch (failure) {
-              if (disposed || !nextService.selected || !nextService.auto_start) throw failure;
+              // A running backend with a missing reply must not be restarted by polling.
+              if (disposed || nextService.running !== false || !nextService.selected || !nextService.auto_start) throw failure;
               setSnapshot(null);
               await invoke('vendor_recover_service');
               if (disposed) return;
@@ -89,8 +96,10 @@ export function useVendorControl<T>(
         } catch {
           if (!disposed) setSnapshot(null);
         } finally {
-          pending.current = false;
-          if (!disposed) setChecking(false);
+          if (pending.current === operation) {
+            pending.current = null;
+            if (!disposed) setChecking(false);
+          }
         }
       }
       if (!disposed) timer = window.setTimeout(tick, interval);
@@ -98,36 +107,45 @@ export function useVendorControl<T>(
     void tick();
     return () => {
       disposed = true;
+      if (lifetime.current === currentLifetime) ++lifetime.current;
       window.clearTimeout(timer);
     };
   }, [probe, read]);
 
   // A broker can accept MQTT before its separate hardware worker is ready.
   // Only explicit connect/restart waits here; normal refresh stays bounded.
-  const readWhenReady = async () => {
-    const deadline = Date.now() + 15_000;
-    for (;;) {
+  const readWhenReady = async (active: () => boolean) => {
+    const deadline = performance.now() + 15_000;
+    while (active()) {
       try {
         return await read(probe);
       } catch (failure) {
-        if (Date.now() >= deadline) throw failure;
+        if (!active()) return null;
+        if (performance.now() >= deadline) throw failure;
         await new Promise((resolve) => window.setTimeout(resolve, 300));
       }
     }
+    return null;
   };
 
-  const run = async (work: () => Promise<void>) => {
+  const run = async (work: (active: () => boolean) => Promise<void>) => {
     if (pending.current) return;
-    pending.current = true;
+    const operation = Symbol();
+    const currentLifetime = lifetime.current;
+    const active = () => lifetime.current === currentLifetime;
+    pending.current = operation;
     setBusy(true);
     setError('');
     try {
-      await work();
+      await work(active);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (active()) setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setBusy(false);
-      pending.current = false;
+      // An old StrictMode/page lifetime must not clear a newer operation's lock.
+      if (pending.current === operation) {
+        pending.current = null;
+        if (active()) setBusy(false);
+      }
     }
   };
 
@@ -137,24 +155,31 @@ export function useVendorControl<T>(
     busy,
     checking,
     error,
-    connect: (persistent?: boolean) => run(async () => {
-      setService(await invoke<VendorServiceState>('vendor_connect_service', { persistent }));
+    connect: (persistent?: boolean) => run(async (active) => {
+      const nextService = await invoke<VendorServiceState>('vendor_connect_service', { persistent });
+      if (!active()) return;
+      setService(nextService);
       if (persistent !== false) {
         try {
-          setSnapshot(await readWhenReady());
+          const next = await readWhenReady(active);
+          if (active()) setSnapshot(next);
         } catch (failure) {
-          setSnapshot(null);
+          if (active()) setSnapshot(null);
           throw failure;
         }
       }
     }),
-    restart: () => run(async () => {
+    restart: () => run(async (active) => {
       setSnapshot(null);
-      setService(await invoke<VendorServiceState>('vendor_restart_service'));
-      setSnapshot(await readWhenReady());
+      const nextService = await invoke<VendorServiceState>('vendor_restart_service');
+      if (!active()) return;
+      setService(nextService);
+      const next = await readWhenReady(active);
+      if (active()) setSnapshot(next);
     }),
-    write: (command: string, args: Record<string, unknown>) => run(async () => {
-      setSnapshot(await read(command, args));
+    write: (command: string, args: Record<string, unknown>) => run(async (active) => {
+      const next = await read(command, args);
+      if (active()) setSnapshot(next);
     }),
   };
 }
