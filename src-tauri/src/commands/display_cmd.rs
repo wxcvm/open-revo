@@ -9,7 +9,7 @@ use crate::system::display_tuning::{
 
 #[tauri::command]
 pub fn switch_refresh_rate(hz: u32) -> Result<(), String> {
-    display::set_refresh_rate(hz)?;
+    crate::system::display_policy::set_primary_fixed(hz)?;
     let mut cfg = crate::system::config::load_config();
     cfg.refresh_rate = hz;
     crate::system::config::save_config(&cfg);
@@ -23,7 +23,7 @@ pub fn get_display_monitors() -> Result<Vec<display::DisplayMonitor>, String> {
 
 #[tauri::command]
 pub fn set_display_monitor_refresh_rate(device_name: String, hz: u32) -> Result<(), String> {
-    display::set_monitor_refresh_rate(&device_name, hz)?;
+    crate::system::display_policy::set_fixed(&device_name, hz)?;
 
     // Only persist cfg.refresh_rate if this is the primary or internal laptop display
     let monitors = display::get_all_monitors();
@@ -43,10 +43,10 @@ pub fn set_display_monitor_refresh_rate(device_name: String, hz: u32) -> Result<
 
 #[tauri::command]
 pub fn set_auto_min_refresh_on_battery(enable: bool) -> Result<bool, String> {
-    let mut cfg = crate::system::config::load_config();
-    cfg.auto_min_refresh_on_battery = enable;
-    crate::system::config::save_config(&cfg);
-    Ok(enable)
+    if enable { return Err("自动低刷已停用，以免覆盖 Windows DRR；请明确选择固定刷新率".into()); }
+    crate::system::display_policy::follow_system()?;
+    crate::system::config::modify_config(|cfg| cfg.auto_min_refresh_on_battery = false);
+    Ok(false)
 }
 
 #[tauri::command]
@@ -405,3 +405,8 @@ pub async fn set_miniled_status(enabled: bool) -> Result<bool, String> {
 }
 
 
+
+#[tauri::command]
+pub fn get_display_policy() -> Result<serde_json::Value, String> {
+    crate::system::display_policy::get_display_policy()
+}

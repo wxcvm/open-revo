@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use std::ffi::CString;
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Gdi::{
-    ChangeDisplaySettingsA, ChangeDisplaySettingsExA, EnumDisplayDevicesA, EnumDisplaySettingsA,
-    EnumDisplaySettingsExA, CDS_RESET, CDS_TYPE, CDS_UPDATEREGISTRY, DEVMODEA, DISPLAY_DEVICEA,
+    ChangeDisplaySettingsExA, EnumDisplayDevicesA, EnumDisplaySettingsA,
+    EnumDisplaySettingsExA, CDS_TYPE, DEVMODEA, DISPLAY_DEVICEA,
     DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE, DM_DISPLAYFREQUENCY,
     EDS_ROTATEDMODE, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE, ENUM_REGISTRY_SETTINGS,
 };
@@ -180,7 +180,7 @@ pub fn get_all_monitors() -> Vec<DisplayMonitor> {
 }
 
 /// Set refresh rate for a specific display device
-pub fn set_monitor_refresh_rate(device_name: &str, hz: u32) -> Result<(), String> {
+pub fn set_monitor_refresh_rate_temporary(device_name: &str, hz: u32) -> Result<(), String> {
     unsafe {
         let dev_cstr = CString::new(device_name).map_err(|e| e.to_string())?;
         let pc_dev_name = PCSTR(dev_cstr.as_ptr() as *const u8);
@@ -202,40 +202,11 @@ pub fn set_monitor_refresh_rate(device_name: &str, hz: u32) -> Result<(), String
             dm.dmDisplayFrequency = hz;
             dm.dmFields |= DM_DISPLAYFREQUENCY;
 
-            // Strategy 1: Save to registry AND apply dynamically immediately (CDS_UPDATEREGISTRY | CDS_RESET)
-            let mut res = ChangeDisplaySettingsExA(
-                pc_dev_name,
-                Some(&dm),
-                None,
-                CDS_UPDATEREGISTRY | CDS_RESET,
-                None,
-            );
-
-            // Strategy 2: If combined flags rejected by driver, try dynamic switch (CDS_RESET)
-            if res.0 != 0 {
-                res = ChangeDisplaySettingsExA(
-                    pc_dev_name,
-                    Some(&dm),
-                    None,
-                    CDS_RESET,
-                    None,
-                );
-            }
-
-            // Strategy 3: Dynamic change without reset flag
-            if res.0 != 0 {
-                res = ChangeDisplaySettingsExA(
-                    pc_dev_name,
-                    Some(&dm),
-                    None,
-                    CDS_TYPE(0),
-                    None,
-                );
-            }
+            let test = ChangeDisplaySettingsExA(pc_dev_name, Some(&dm), None, CDS_TYPE(2), None);
+            if test.0 != 0 { return Err(format!("Display validation rejected: {}", test.0)); }
+            let res = ChangeDisplaySettingsExA(pc_dev_name, Some(&dm), None, CDS_TYPE(0), None);
 
             if res.0 == 0 {
-                // Notify Desktop Window Manager to re-evaluate and apply desktop layout
-                let _ = ChangeDisplaySettingsExA(None, None, None, CDS_TYPE(0), None);
                 return Ok(());
             }
             return Err(format!(
@@ -358,22 +329,11 @@ pub fn get_refresh_rate() -> u32 {
 
 /// Set primary display refresh rate (Hz)
 pub fn set_refresh_rate(hz: u32) -> Result<(), String> {
-    unsafe {
-        let mut dm: DEVMODEA = std::mem::zeroed();
-        dm.dmSize = std::mem::size_of::<DEVMODEA>() as u16;
+    super::display_policy::set_primary_fixed(hz)
+}
 
-        if EnumDisplaySettingsA(None, ENUM_CURRENT_SETTINGS, &mut dm).as_bool() {
-            dm.dmDisplayFrequency = hz;
-            dm.dmFields |= DM_DISPLAYFREQUENCY;
-
-            let res = ChangeDisplaySettingsA(Some(&dm), CDS_UPDATEREGISTRY);
-            if res.0 == 0 {
-                return Ok(());
-            }
-            return Err(format!("ChangeDisplaySettings failed with code: {}", res.0));
-        }
-        Err("EnumDisplaySettings failed to get current settings".into())
-    }
+pub fn set_monitor_refresh_rate(device_name: &str, hz: u32) -> Result<(), String> {
+    super::display_policy::set_fixed(device_name, hz)
 }
 
 /// Enumerate all available refresh rates supported on primary display

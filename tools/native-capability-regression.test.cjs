@@ -50,3 +50,26 @@ test('Windows policy failure is propagated rather than saved as success', () => 
   const single = commands.slice(commands.indexOf('pub fn set_sleep_guard_option'), commands.indexOf('pub fn set_master_sleep_guard'));
   assert.ok(single.indexOf('apply_sleep_guard_option(&option, enable)?') < single.indexOf('save_config'));
 });
+
+
+test('power transitions never set fixed refresh rates or announce unconfirmed success', () => {
+  const watcher=read('src-tauri/src/system/switches/watcher.rs');
+  assert.doesNotMatch(watcher, /set_monitor_refresh_rate|auto_min_refresh_on_battery|refresh-rate-changed/);
+  assert.match(watcher, /previous != is_ac/);
+});
+
+test('display changes are explicit, temporary and restored only while still owned', () => {
+  const policy=read('src-tauri/src/system/display_policy.rs');
+  assert.match(policy, /snapshot\(\)\?\.signature != \*previous/);
+  assert.match(policy, /restore\(original\)\?/);
+  const display=read('src-tauri/src/system/display.rs');
+  assert.doesNotMatch(display, /CDS_UPDATEREGISTRY/);
+  assert.match(display, /Display validation rejected/);
+});
+
+test('battery health only issues query IOCTLs and preserves unknown capacity and rate', () => {
+  const battery=read('src-tauri/src/system/battery.rs');
+  assert.doesNotMatch(battery, /0x294048|IOCTL_BATTERY_SET_INFORMATION|powershell/);
+  assert.match(battery, /i32::MIN/);
+  assert.match(battery, /value == u32::MAX/);
+});

@@ -5,7 +5,32 @@ use parking_lot::RwLock;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageProfile {
+    pub id: String,
+    pub name: String,
+    pub native_mode: u8,
+    pub energy_mode: String,
+    pub brightness: Option<u8>,
+    pub keyboard_timeout: Option<u32>,
+    pub refresh_hz: Option<u32>,
+}
+
+pub fn default_usage_profiles() -> Vec<UsageProfile> {
+    [("office", "办公均衡", 2, "balanced"), ("endurance", "长续航", 2, "efficiency"), ("performance", "高性能", 3, "performance")]
+        .into_iter().map(|(id, name, native_mode, energy)| UsageProfile {
+            id: id.into(), name: name.into(), native_mode, energy_mode: energy.into(),
+            brightness: None, keyboard_timeout: None, refresh_hz: None,
+        }).collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_usage_profiles")]
+    pub usage_profiles: Vec<UsageProfile>,
+    #[serde(default)]
+    pub usage_auto_ac: Option<String>,
+    #[serde(default)]
+    pub usage_auto_battery: Option<String>,
     #[serde(default = "default_power_mode")]
     pub power_mode: u8,           // 1: Office, 2: Balance, 3: Beast, 4: Custom (Current live active mode)
     #[serde(default = "default_power_mode_ac")]
@@ -393,6 +418,9 @@ fn default_osd_position() -> String { "top-left".to_string() }
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            usage_profiles: default_usage_profiles(),
+            usage_auto_ac: None,
+            usage_auto_battery: None,
             power_mode: 2,          // Default Balance
             power_mode_ac: 3,       // Default Beast on AC
             power_mode_battery: 2,  // Default Balance on Battery
@@ -1261,6 +1289,7 @@ fn load_config_from_disk() -> AppConfig {
                     save_config_to_disk(&cfg);
                     crate::log_info!("CONFIG", "Persisted explicit GPU offset bounds into config.json");
                 }
+                cfg.auto_min_refresh_on_battery = false;
                 return cfg;
             }
         }

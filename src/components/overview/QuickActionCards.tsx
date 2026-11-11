@@ -90,13 +90,13 @@ export const QuickActionCards: React.FC<QuickActionCardsProps> = ({
   }, [onSwitchRefreshRate]);
 
   const handleToggleAutoMinRefresh = async () => {
-    const nextVal = !autoMinRefresh;
+    const nextVal = false;
     setAutoMinRefresh(nextVal);
     try {
       await invoke('set_auto_min_refresh_on_battery', { enable: nextVal });
     } catch (e) {
       console.error('Failed to toggle auto min refresh:', e);
-      setAutoMinRefresh(!nextVal);
+      setAutoMinRefresh(false);
     }
   };
 
@@ -205,10 +205,10 @@ export const QuickActionCards: React.FC<QuickActionCardsProps> = ({
         )
       )}
 
-      {/* 2. 拔电自动低刷 */}
+      {/* 2. 跟随 Windows */}
       <div
         className="glass-card"
-        title="开启后，当断开电源适配器时自动将屏幕切换至面板支持的最低刷新率以最大化电池续航；若使用电池时手动调整了刷新率，将维持手动设定"
+        title="跟随 Windows，不再自动设置固定刷新率；点击恢复本次覆盖前状态"
         style={{
           minWidth: '180px',
           display: 'flex',
@@ -220,15 +220,15 @@ export const QuickActionCards: React.FC<QuickActionCardsProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <ZapOff className={`w-5 h-5 ${autoMinRefresh ? 'text-indigo-400' : 'text-slate-400'} flex-shrink-0`} />
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 600 }}>拔电自动低刷</div>
-            <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>离电续航最大化</div>
+            <div style={{ fontSize: '12px', fontWeight: 600 }}>跟随 Windows</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>不干预系统 DRR；点击恢复本次修改前状态</div>
           </div>
         </div>
         <button
           onClick={handleToggleAutoMinRefresh}
           className={`toggle-btn ${autoMinRefresh ? 'active-indigo' : ''}`}
         >
-          {autoMinRefresh ? '已开启' : '关闭'}
+          恢复系统
         </button>
       </div>
 

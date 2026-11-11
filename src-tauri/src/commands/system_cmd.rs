@@ -200,7 +200,7 @@ pub fn collect_hardware_state(
         refresh_rate: display::get_refresh_rate(),
         available_refresh_rates: display::get_available_refresh_rates(),
         monitors: display::get_all_monitors(),
-        auto_min_refresh_on_battery: cfg.auto_min_refresh_on_battery,
+        auto_min_refresh_on_battery: false,
         unlock_battery_power_limit: cfg.unlock_battery_power_limit,
         win_key_locked: if let Some(val) = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_STATUS_BYTE) {
             (val & crate::driver::wmi_ec::STATUS_WINLOCK) != 0

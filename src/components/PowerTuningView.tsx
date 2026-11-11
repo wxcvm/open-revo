@@ -1,3 +1,4 @@
+import { UsageProfilesPanel } from './UsageProfilesPanel';
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Zap, Battery, Plug, ShieldCheck, Globe, Ban, Lock, Clock, Moon, Snowflake, Info } from 'lucide-react';
@@ -174,6 +175,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
 
   return (
     <div className="power-view-container">
+      <UsageProfilesPanel />
       {error && <div className="quick-row" role="alert">{error}</div>}
       {/* 1. Top Header Bar with Auto Office Checkbox */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, gap: '12px' }}>

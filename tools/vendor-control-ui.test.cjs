@@ -72,6 +72,12 @@ window.mount();
       window.__TAURI_INTERNALS__ = { transformCallback() {return 1;}, async invoke(name, args) {
         f.calls.push(name);
         const state = () => ({ present: true, selected: f.selected, running: f.running, auto_start: true });
+        if (name === 'get_usage_settings') return f.usage || null;
+        if (name === 'get_display_policy') return {policy:'follow_system',paths:[{target_id:256,drr_enabled:true,virtual_hz:60}]};
+        if (name === 'set_windows_energy') { if(f.usageFail) throw new Error('energy rejected'); f.usage.current_energy=args.mode; return; }
+        if (name === 'save_usage_settings') { f.usage=JSON.parse(JSON.stringify(args.settings)); return; }
+        if (name === 'apply_usage_profile') return f.usageFail ? {applied:[],failed:['firmware: readback rejected'],rollback_failed:[]} : {applied:['firmware','windows_energy'],failed:[],rollback_failed:[]};
+        if (name === 'get_battery_health') return [{instance:'battery0',designed_capacity:null,full_capacity:80690,cycles:null,charge_rate:6000,discharge_rate:0,charging:true,discharging:false,capacity_relative:0,remaining_capacity:78000}];
         if (name === 'get_system_stats') { if(f.failStats) throw new Error('sensor unavailable'); return null; }
         if (name === 'get_power_settings') return f.power;
         if (name === 'set_power_option') {
@@ -144,6 +150,34 @@ window.mount();
 
     await page.evaluate(() => { window.fixture.running = false; window.fixture.failProbe = false; window.mount(); });
     await page.waitForFunction(() => window.control.snapshot && !window.control.checking && document.querySelector('pre'));
+    await page.evaluate(() => {
+      window.fixture.usage={supported:true,profiles:[{id:'office',name:'Office fixture',native_mode:2,energy_mode:'balanced',brightness:null,keyboard_timeout:null,refresh_hz:null}],auto_ac:null,auto_battery:null,current_energy:'balanced',current_native_mode:2};
+      window.mountPower();
+    });
+    await page.getByRole('button',{name:'Office fixture',exact:true}).waitFor();
+    const energy=page.getByRole('combobox',{name:'Windows 能源模式',exact:true});
+    await energy.selectOption('efficiency');
+    await page.waitForFunction(()=>window.fixture.usage.current_energy==='efficiency');
+    await page.getByRole('button',{name:'Office fixture',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'已应用 Office fixture'}).waitFor();
+    await page.evaluate(()=>{window.fixture.usageFail=true;});
+    await page.getByRole('button',{name:'Office fixture',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'应用失败'}).waitFor();
+    console.log('PASS usage profiles: independent energy selection and truthful failed apply');
+    await page.getByRole('button',{name:'编辑场景',exact:true}).click();
+    await page.getByRole('textbox',{name:'office 名称',exact:true}).fill('Edited fixture');
+    assert.equal(await page.getByRole('button',{name:'Edited fixture',exact:true}).isDisabled(),true);
+    await page.getByRole('button',{name:'保存配置',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'场景配置已保存'}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Edited fixture',exact:true}).isEnabled(),true);
+    assert.equal(await page.getByRole('combobox',{name:'插电场景',exact:true}).inputValue(),'');
+    console.log('PASS profile editing: save does not apply hardware; automation defaults off');
+    await page.getByRole('button',{name:'读取／刷新',exact:true}).click();
+    await page.getByText('80.7 Wh',{exact:true}).waitFor();
+    await page.getByText('6.0 W',{exact:true}).waitFor();
+    const battery=page.locator('.usage-battery');
+    assert.equal(await battery.getByText('未提供',{exact:true}).count(),4);
+    console.log('PASS battery health: unsupported capacity/cycles stay unknown, real units retained');
     assert.deepEqual(errors, []);
     console.log('PASS StrictMode remount: new lifetime receives its own snapshot and releases pending state');
 

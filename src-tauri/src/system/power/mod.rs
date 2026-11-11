@@ -19,61 +19,12 @@ pub use ppm::{
 };
 pub use presets::{get_factory_power_presets, get_cached_factory_power_presets, refresh_factory_power_presets, FactoryPowerPresets};
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct GUID {
-    pub data1: u32,
-    pub data2: u16,
-    pub data3: u16,
-    pub data4: [u8; 8],
-}
-
-// Windows 10/11 Official Power Overlay Scheme GUIDs
-// Best Power Efficiency: 961cc777-2547-4f9d-8174-7d86181b8a7a
-pub const GUID_OFFICE_SAVER: GUID = GUID {
-    data1: 0x961cc777,
-    data2: 0x2547,
-    data3: 0x4f9d,
-    data4: [0x81, 0x74, 0x7d, 0x86, 0x18, 0x1b, 0x8a, 0x7a],
-};
-
-pub const GUID_BALANCED: GUID = GUID {
-    data1: 0x00000000,
-    data2: 0x0000,
-    data3: 0x0000,
-    data4: [0, 0, 0, 0, 0, 0, 0, 0],
-};
-
-pub const GUID_TURBO_PERF: GUID = GUID {
-    data1: 0xded574b5,
-    data2: 0x45a0,
-    data3: 0x4f42,
-    data4: [0x87, 0x37, 0x46, 0x34, 0x5c, 0x09, 0xc2, 0x38],
-};
-
+pub use crate::system::windows_energy::{GUID, GUID_OFFICE_SAVER, GUID_BALANCED, GUID_TURBO_PERF};
+pub(crate) use crate::system::windows_energy::{set_active_overlay_scheme, get_actual_overlay_scheme};
 #[link(name = "kernel32")]
 extern "system" {
     fn LoadLibraryA(lp_lib_filename: *const u8) -> *mut std::ffi::c_void;
     fn GetProcAddress(h_module: *mut std::ffi::c_void, lp_proc_name: *const u8) -> *mut std::ffi::c_void;
-}
-
-type FnPowerSetActiveOverlayScheme = unsafe extern "system" fn(*const GUID) -> u32;
-
-fn set_active_overlay_scheme(guid_ptr: *const GUID) -> u32 {
-    unsafe {
-        let dll_name = b"powrprof.dll\0";
-        let h_mod = LoadLibraryA(dll_name.as_ptr());
-        if h_mod.is_null() {
-            return 1;
-        }
-        let fn_name = b"PowerSetActiveOverlayScheme\0";
-        let p_func = GetProcAddress(h_mod, fn_name.as_ptr());
-        if p_func.is_null() {
-            return 2;
-        }
-        let func: FnPowerSetActiveOverlayScheme = std::mem::transmute(p_func);
-        func(guid_ptr)
-    }
 }
 
 #[repr(C)]

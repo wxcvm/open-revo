@@ -31,13 +31,13 @@ export const DrawerDisplayCard: React.FC<DrawerDisplayCardProps> = ({
   }, [status.auto_min_refresh_on_battery]);
 
   const handleToggleAutoMinHz = async () => {
-    const nextVal = !autoMinHz;
+    const nextVal = false;
     setAutoMinHz(nextVal);
     try {
       await invoke('set_auto_min_refresh_on_battery', { enable: nextVal });
     } catch (e) {
       console.error('Failed to toggle auto min refresh:', e);
-      setAutoMinHz(!nextVal);
+      setAutoMinHz(false);
     }
   };
 
@@ -212,7 +212,7 @@ export const DrawerDisplayCard: React.FC<DrawerDisplayCardProps> = ({
         </div>
 
         <div className="m-grid-4">
-          {/* 1/4: 拔电自动低刷 */}
+          {/* 1/4: 跟随 Windows */}
           <button
             className="m-btn-hz"
             style={
@@ -225,10 +225,10 @@ export const DrawerDisplayCard: React.FC<DrawerDisplayCardProps> = ({
                 : {}
             }
             onClick={handleToggleAutoMinHz}
-            title="拔掉充电器时自动将内置屏幕切换至最低支持刷新率以延长续航 (外接屏不受影响)"
+            title="恢复本次固定刷新率修改前状态；不自动开启或关闭 Windows DRR"
           >
             <Battery size={12} />
-            <span>拔电低刷</span>
+            <span>跟随系统</span>
           </button>
 
           {/* 2/4: 最低档 */}

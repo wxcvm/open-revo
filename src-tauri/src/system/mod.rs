@@ -32,3 +32,9 @@ pub mod plugin_service;
 pub mod shortcuts;
 pub mod raw_gateway;
 pub mod watcher_hub;
+
+pub mod display_policy;
+
+pub mod battery;
+
+pub mod windows_energy;

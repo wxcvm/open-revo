@@ -32,3 +32,5 @@ pub use raw_ec_cmd::*;
 pub use watcher_cmd::*;
 pub use sysinfo_cmd::*;
 pub use vendor_cmd::*;
+
+pub mod usage_cmd;

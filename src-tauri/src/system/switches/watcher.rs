@@ -383,27 +383,21 @@ pub fn start_hardware_state_watcher(
             last_dc_line = Some(is_dc);
 
 
+            if crate::hal::xingyao::is_active() && last_ac_line.is_some_and(|previous| previous != is_ac) {
+                let cfg = crate::system::config::load_config();
+                let selected = if is_ac { cfg.usage_auto_ac } else { cfg.usage_auto_battery };
+                if let Some(id) = selected {
+                    match crate::commands::usage_cmd::apply_usage_profile(id, app.clone()) {
+                        Ok(result) => { use tauri::Emitter; let _ = app.emit("usage-profile-applied", result); }
+                        Err(error) => { crate::log_warn!("USAGE_PROFILE", "{}", error); }
+                    }
+                }
+            }
+
             if let Some(last_ac) = last_ac_line {
                 if last_ac && !is_ac {
                     // Transition: Plugged -> Unplugged
                     let cfg = crate::system::config::load_config();
-                    if cfg.auto_min_refresh_on_battery {
-                        let monitors = crate::system::display::get_all_monitors();
-                        if let Some(target_mon) = monitors.iter().find(|m| m.is_internal).or_else(|| monitors.first()) {
-                            if let Some(&min_rate) = target_mon.supported_rates.first() {
-                                if target_mon.current_hz != min_rate {
-                                    crate::log_info!("POWER_WATCHER", "AC unplugged: auto-switching internal screen ({}) refresh rate {}Hz -> {}Hz", target_mon.friendly_name, target_mon.current_hz, min_rate);
-                                    let _ = crate::system::display::set_monitor_refresh_rate(&target_mon.device_name, min_rate);
-                                    let mut updated_cfg = crate::system::config::load_config();
-                                    updated_cfg.refresh_rate = min_rate;
-                                    crate::system::config::save_config(&updated_cfg);
-                                    use tauri::Emitter;
-                                    let _ = app.emit("refresh-rate-changed", min_rate);
-                                }
-                            }
-                        }
-                    }
-
                     // Auto-fallback keyboard engine to factory hardware mode on battery (Gaming laptops only)
                     if !is_ultrabook && cfg.auto_fallback_kb_on_battery {
                         let lighting = crate::driver::ite_lighting::get_global_lighting();
@@ -438,23 +432,6 @@ pub fn start_hardware_state_watcher(
                 } else if !last_ac && is_ac {
                     // Transition: Unplugged -> Plugged back in
                     let cfg = crate::system::config::load_config();
-                    if cfg.auto_min_refresh_on_battery {
-                        let monitors = crate::system::display::get_all_monitors();
-                        if let Some(target_mon) = monitors.iter().find(|m| m.is_internal).or_else(|| monitors.first()) {
-                            if let Some(&max_rate) = target_mon.supported_rates.last() {
-                                if target_mon.current_hz != max_rate {
-                                    crate::log_info!("POWER_WATCHER", "AC plugged in: restoring high refresh rate ({}) {}Hz -> {}Hz", target_mon.friendly_name, target_mon.current_hz, max_rate);
-                                    let _ = crate::system::display::set_monitor_refresh_rate(&target_mon.device_name, max_rate);
-                                    let mut updated_cfg = crate::system::config::load_config();
-                                    updated_cfg.refresh_rate = max_rate;
-                                    crate::system::config::save_config(&updated_cfg);
-                                    use tauri::Emitter;
-                                    let _ = app.emit("refresh-rate-changed", max_rate);
-                                }
-                            }
-                        }
-                    }
-
                     if !is_ultrabook {
                         // Auto-restore BetterRGB streamer on AC plug-in
                         let lighting = crate::driver::ite_lighting::get_global_lighting();

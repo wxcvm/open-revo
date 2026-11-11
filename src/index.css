@@ -3522,3 +3522,17 @@ body,
 .power-options-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: var(--power-layout-gap); }
 .power-battery-layout { display: grid; grid-template-columns: 1.3fr 1fr; gap: var(--power-battery-gap); align-items: center; }
 .power-battery-layout.is-read-only { grid-template-columns: 1fr; }
+
+/* Usage profiles share the system design tokens in every theme. */
+.usage-panel { display: flex; flex-direction: column; gap: var(--space-md, 12px); }
+.usage-panel h3, .usage-panel p { margin: 0; }
+.usage-actions, .usage-editor { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md, 12px); }
+.usage-actions label, .usage-editor label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm, 8px); }
+.usage-editor { border-top: 1px solid var(--border-medium); padding-block: var(--space-md, 12px); }
+.usage-panel select, .usage-panel input:not([type=checkbox]) { background: var(--surface-overlay); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: var(--radius-sm, 6px); padding: var(--space-sm, 8px); max-width: 100%; }
+.usage-panel input[type=number] { width: 100px; }
+.usage-battery { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md, 12px); margin: 0; }
+.usage-battery dt { color: var(--text-dim); }
+.usage-battery dd { margin: 0; color: var(--text-primary); }
+.usage-notice { color: var(--text-primary); overflow-wrap: anywhere; }
+[data-theme="mono"] .usage-panel { color: var(--text-primary); }

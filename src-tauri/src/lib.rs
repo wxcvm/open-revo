@@ -184,6 +184,12 @@ pub fn run() {
             commands::hardware_cmd::set_battery_limit,
             commands::hardware_cmd::switch_refresh_rate,
             commands::hardware_cmd::get_display_monitors,
+            commands::hardware_cmd::get_display_policy,
+            commands::usage_cmd::get_usage_settings,
+            commands::usage_cmd::save_usage_settings,
+            commands::usage_cmd::apply_usage_profile,
+            commands::usage_cmd::set_windows_energy,
+            commands::usage_cmd::get_battery_health,
             commands::hardware_cmd::set_display_monitor_refresh_rate,
             commands::hardware_cmd::set_auto_min_refresh_on_battery,
             commands::hardware_cmd::set_unlock_battery_power_limit,
@@ -473,6 +479,7 @@ pub fn run() {
         .expect("error while building OpenRevo application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                let _ = crate::system::display_policy::follow_system();
                 println!("[OpenRevo] Process exiting. Executing clean webview shutdown and hardware safety shutdown...");
                 crate::system::webview_orchestrator::WebviewOrchestrator::global().safe_shutdown_all_subviews();
                 crate::system::tray::safe_hardware_shutdown_on_exit();

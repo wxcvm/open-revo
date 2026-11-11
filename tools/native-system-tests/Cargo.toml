@@ -1,0 +1,13 @@
+[package]
+name = "openrevo-native-system-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+windows = { version = "0.58", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Graphics_Gdi", "Win32_Devices_Display"] }
+[lib]
+path = "lib.rs"

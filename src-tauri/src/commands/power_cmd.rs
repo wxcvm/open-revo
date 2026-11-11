@@ -241,6 +241,7 @@ pub fn is_dc_round_plugged_in() -> bool {
 
 #[tauri::command]
 pub fn set_power_mode(mode: u8, app: AppHandle, ec_state: State<'_, SharedEcBridge>) -> Result<(), String> {
+    let _control_guard = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
     let is_thin_and_light = is_thin_and_light_or_pure_igpu();
     let is_dc = is_dc_round_plugged_in();
     let mut cfg = crate::system::config::load_config();
