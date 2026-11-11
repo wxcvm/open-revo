@@ -36,6 +36,8 @@ No version bump to upstream 0.9.4 and no claim of full upstream synchronization.
   maximums no longer produce estimated percentages or a made-up 6000-RPM ceiling.
 - Keep real Windows power/sleep settings; propagate failed policy commands and
   avoid optimistic enabled states. This is not reboot/suspend acceptance.
+- Explicitly unsupported cooling capability overrides stale UI/module settings;
+  the STX backend refuses cooling enablement and never launches its BLE supervisor.
 - Keep both verified native fan channels; a read-only model review must not
   override actual two-channel WMI evidence with an inference from an old manifest.
 

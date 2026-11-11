@@ -6,6 +6,15 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const commands = read('src-tauri/src/commands/power_cmd.rs');
 
+test('native cooling exclusion precedes stored overrides and paired-device probing', () => {
+  const config=read('src-tauri/src/system/config.rs');
+  const body=config.slice(config.indexOf('pub fn is_water_cooler_enabled'), config.indexOf('pub fn get_module_toggles'));
+  assert.ok(body.indexOf('xingyao::is_active') < body.indexOf('load_config'));
+  const cooler=read('src-tauri/src/commands/cooler_cmd.rs');
+  const start=cooler.slice(cooler.indexOf('pub fn start_water_cooler'),cooler.indexOf('pub fn get_water_cooler_status'));
+  assert.ok(start.indexOf('xingyao::is_active') < start.indexOf('get_global_cooler'));
+});
+
 test('power queries cannot write hardware or commit preferences', () => {
   const query = commands.slice(commands.indexOf('pub fn get_power_settings'), commands.indexOf('fn get_active_power_scheme_guid'));
   assert.doesNotMatch(query, /wmi_write_ec|save_config|apply_ec_option/);

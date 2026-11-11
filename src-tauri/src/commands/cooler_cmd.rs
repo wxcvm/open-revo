@@ -5,7 +5,8 @@ use crate::driver::ble_cooler::CoolerTelemetry;
 use crate::system::config::CoolerCurvePoint;
 
 #[tauri::command]
-pub fn start_water_cooler(pump_v: Option<u8>, fan_d: Option<u8>) -> CoolerTelemetry {
+pub fn start_water_cooler(pump_v: Option<u8>, fan_d: Option<u8>) -> Result<CoolerTelemetry, String> {
+    if crate::hal::xingyao::is_active() { return Err("本机未适配外置水冷控制".into()); }
     let cooler = crate::driver::ble_cooler::get_global_cooler();
     if !cooler.get_telemetry().connected {
         if let Some(paired) = crate::driver::ble_cooler::find_paired_water_cooler_mac() {
@@ -21,7 +22,7 @@ pub fn start_water_cooler(pump_v: Option<u8>, fan_d: Option<u8>) -> CoolerTeleme
         cooler.set_params(pump_v, fan_d);
     }
     cooler.clone().start_active_cooling();
-    cooler.get_telemetry()
+    Ok(cooler.get_telemetry())
 }
 
 #[tauri::command]
@@ -125,6 +126,9 @@ pub fn get_water_cooler_enabled() -> bool {
 
 #[tauri::command]
 pub fn set_water_cooler_enabled(enabled: bool) -> Result<bool, String> {
+    if enabled && crate::hal::xingyao::is_active() {
+        return Err("本机未适配外置水冷控制".into());
+    }
     let mut cfg = crate::system::config::load_config();
     cfg.water_cooler_enabled = Some(enabled);
     cfg.module_toggles.insert("water".to_string(), enabled);

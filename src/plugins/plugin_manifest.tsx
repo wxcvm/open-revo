@@ -137,7 +137,7 @@ export const BUILTIN_MODULE_SLOTS: BuiltinModuleSlot[] = [
     order: 50,
     icon: Droplets,
     description: '第二代外置水冷低功耗蓝牙控制、水温遥测与智能温控曲线',
-    isVisible: (ctx) => ctx.isWaterCoolerEnabled,
+    isVisible: (ctx) => ctx.capabilities?.water_cooling !== false && ctx.isWaterCoolerEnabled,
     renderBadge: (ctx) => {
       if (ctx.isCoolerConnected) {
         return <span className="cooler-tab-dot" />;

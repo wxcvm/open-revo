@@ -1343,6 +1343,7 @@ pub fn reload_config_from_disk() -> AppConfig {
 /// 2. If Windows already has a paired water cooler, naturally self-heals and enables
 /// 3. If unset/default, defaults to physical hardware detection (`has_water_cooler`)
 pub fn is_water_cooler_enabled() -> bool {
+    if crate::hal::xingyao::is_active() { return false; }
     let cfg = load_config();
     // 1. Explicit legacy config field preference if present
     if let Some(user_pref) = cfg.water_cooler_enabled {
@@ -1379,6 +1380,7 @@ pub fn get_module_toggles() -> std::collections::HashMap<String, bool> {
 
 /// Update a specific module toggle in config.json and return the updated state
 pub fn set_module_enabled(id: &str, enabled: bool) -> bool {
+    if id == "water" && crate::hal::xingyao::is_active() { return false; }
     // Defense in depth: do not allow disabling system, sponsor, or plugins
     if id == "system" || id == "sponsor" || id == "plugins" {
         return true;

@@ -140,12 +140,20 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
       .catch((err) => console.warn('Failed to load module toggles:', err));
   }, []);
 
+  // Model Capabilities (Declarative Hardware Driver Contract)
+  const realCapabilitiesRef = useRef<ModelCapabilities | undefined>(undefined);
+  const [internalCapabilities, setInternalCapabilities] = useState<ModelCapabilities | undefined>(undefined);
+  const [internalPreviewMode, setInternalPreviewMode] = useState<'real' | 'thin_light' | 'gaming'>('real');
+
+  const capabilities = propCapabilities !== undefined ? propCapabilities : internalCapabilities;
+  const previewMode = propPreviewMode !== undefined ? propPreviewMode : internalPreviewMode;
+
   const [localWaterCoolerEnabled, setLocalWaterCoolerEnabled] = useState<boolean | null>(null);
-  const isWaterCoolerEnabled = localWaterCoolerEnabled !== null
+  const isWaterCoolerEnabled = capabilities?.water_cooling !== false && (localWaterCoolerEnabled !== null
     ? localWaterCoolerEnabled
     : (moduleToggles.water !== undefined
         ? moduleToggles.water
-        : (status.water_cooler_enabled ?? status.support_flags?.has_water_cooler ?? false));
+        : (status.water_cooler_enabled ?? status.support_flags?.has_water_cooler ?? false)));
 
   useEffect(() => {
     if (typeof moduleToggles.water === 'boolean') {
@@ -161,14 +169,6 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
       setActiveTab('overview');
     }
   }, [isWaterCoolerEnabled, activeTab]);
-
-  // Model Capabilities (Declarative Hardware Driver Contract)
-  const realCapabilitiesRef = useRef<ModelCapabilities | undefined>(undefined);
-  const [internalCapabilities, setInternalCapabilities] = useState<ModelCapabilities | undefined>(undefined);
-  const [internalPreviewMode, setInternalPreviewMode] = useState<'real' | 'thin_light' | 'gaming'>('real');
-
-  const capabilities = propCapabilities !== undefined ? propCapabilities : internalCapabilities;
-  const previewMode = propPreviewMode !== undefined ? propPreviewMode : internalPreviewMode;
 
   useEffect(() => {
     if (propCapabilities === undefined) {
@@ -722,6 +722,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
         {activeTab === 'plugins' && (
           <ModuleErrorBoundary moduleName="插件管理" onNavigateToOverview={() => setActiveTab('overview')}>
             <PluginsView
+              capabilities={capabilities}
               status={status}
               moduleToggles={moduleToggles}
               onToggleModule={handleToggleModule}

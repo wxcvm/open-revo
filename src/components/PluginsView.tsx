@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { HardwareState } from '../types/hardware';
 import { RevBadge, RevSwitch } from './ui';
-import { BUILTIN_MODULE_SLOTS, BuiltinModuleSlot } from '../plugins/plugin_manifest';
+import { BUILTIN_MODULE_SLOTS, BuiltinModuleSlot, ModelCapabilities } from '../plugins/plugin_manifest';
 
 export interface PluginServiceConfig {
   executable: string;
@@ -42,6 +42,7 @@ export interface CustomPluginItem {
 }
 
 export interface PluginsViewProps {
+  capabilities?: ModelCapabilities;
   status: HardwareState;
   moduleToggles?: Record<string, boolean>;
   onToggleModule?: (id: string, enabled: boolean) => void;
@@ -55,6 +56,7 @@ export interface PluginsViewProps {
 }
 
 export const PluginsView: React.FC<PluginsViewProps> = ({
+  capabilities,
   status,
   moduleToggles,
   onToggleModule,
@@ -275,6 +277,8 @@ export const PluginsView: React.FC<PluginsViewProps> = ({
   // Builtin modules: Strictly exclude "system", "plugins", and "sponsor"
   const builtinSlots = BUILTIN_MODULE_SLOTS.filter(
     (slot) => slot.id !== 'system' && slot.id !== 'plugins' && slot.id !== 'sponsor'
+      && (slot.id !== 'water' || capabilities?.water_cooling !== false)
+      && (slot.id !== 'lighting' || capabilities?.rgb_keyboard?.supported !== false)
   );
 
   return (

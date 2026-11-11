@@ -22,6 +22,7 @@ import { ModeSelector } from '/src/components/ModeSelector.tsx';
 import { MiniDrawer } from '/src/components/MiniDrawer.tsx';
 import { PowerTuningView } from '/src/components/PowerTuningView.tsx';
 import { SystemMonitorView } from '/src/components/SystemMonitorView.tsx';
+import { BUILTIN_MODULE_SLOTS } from '/src/plugins/plugin_manifest.tsx';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 function Fixture() {
   const control = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
@@ -53,6 +54,9 @@ window.mountMonitor = () => root.render(React.createElement(SystemMonitorView, {
   nativeControl:true, status:{cpu_fan_rpm:3000,gpu_fan_rpm:2800,vendor_bus_selected:false,
     support_flags:{has_fan_boost:false},gpu_name:'AMD Radeon 880M'}
 }));
+window.coolerVisible = supported => BUILTIN_MODULE_SLOTS.find(s=>s.id==='water').isVisible({
+  status:{},isWaterCoolerEnabled:true,isCoolerConnected:false,capabilities:{water_cooling:supported}
+});
 window.mount();
 </script></body></html>`);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
@@ -206,6 +210,9 @@ window.mount();
     assert.equal(await page.evaluate(() => window.fixture.calls.filter(x=>x==='vendor_service_state').length),checksBeforeMonitor);
     await page.getByText('原生 WMI · 无需官方后台',{exact:true}).waitFor();
     console.log('PASS monitor: no OEM polling, fabricated demo storage or unverified fan maximum');
+    assert.equal(await page.evaluate(() => window.coolerVisible(false)),false);
+    assert.equal(await page.evaluate(() => window.coolerVisible(true)),true);
+    console.log('PASS cooling capabilities: stale enabled preference cannot expose unsupported hardware; supported models retained');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
