@@ -159,42 +159,50 @@ pub fn set_active_windows_power_scheme(guid: &str) -> Result<(), String> {
 }
 
 /// Applies a single SleepGuard policy via `powercfg`
+fn run_powercfg_checked(args: &[&str]) -> Result<(), String> {
+    let output = run_powercfg(args)?;
+    if !output.status.success() {
+        return Err(format!("Windows 电源策略设置失败（{}）：{}", output.status, decode_ansi_or_utf8(&output.stderr)));
+    }
+    Ok(())
+}
+
 pub fn apply_sleep_guard_option(option: &str, enable: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         match option {
             "disconnect_net" => {
                 let val = if enable { "0" } else { "1" };
-                let _ = run_powercfg(&["/setdcvalueindex", "scheme_current", "SUB_NONE", "f15576e8-98b7-4186-b944-eafa664402d9", val]);
-                let _ = run_powercfg(&["/setacvalueindex", "scheme_current", "SUB_NONE", "f15576e8-98b7-4186-b944-eafa664402d9", val]);
+                run_powercfg_checked(&["/setdcvalueindex", "scheme_current", "SUB_NONE", "f15576e8-98b7-4186-b944-eafa664402d9", val])?;
+                run_powercfg_checked(&["/setacvalueindex", "scheme_current", "SUB_NONE", "f15576e8-98b7-4186-b944-eafa664402d9", val])?;
             }
             "block_away" => {
                 let val = if enable { "0" } else { "1" };
-                let _ = run_powercfg(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "25dfa149-5dd1-4736-b5ab-e8a37b5b8187", val]);
-                let _ = run_powercfg(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "25dfa149-5dd1-4736-b5ab-e8a37b5b8187", val]);
+                run_powercfg_checked(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "25dfa149-5dd1-4736-b5ab-e8a37b5b8187", val])?;
+                run_powercfg_checked(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "25dfa149-5dd1-4736-b5ab-e8a37b5b8187", val])?;
             }
             "ignore_sysreq" => {
                 let val = if enable { "0" } else { "1" };
-                let _ = run_powercfg(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "a4b195f5-8225-47d8-8012-9d41369786e2", val]);
-                let _ = run_powercfg(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "a4b195f5-8225-47d8-8012-9d41369786e2", val]);
+                run_powercfg_checked(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "a4b195f5-8225-47d8-8012-9d41369786e2", val])?;
+                run_powercfg_checked(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "a4b195f5-8225-47d8-8012-9d41369786e2", val])?;
             }
             "disable_wake_timers" => {
                 let val = if enable { "0" } else { "1" };
-                let _ = run_powercfg(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d", val]);
-                let _ = run_powercfg(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d", val]);
+                run_powercfg_checked(&["/setdcvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d", val])?;
+                run_powercfg_checked(&["/setacvalueindex", "scheme_current", "238c9fa8-0aad-41ed-83f4-97be242c8f20", "bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d", val])?;
             }
             "deep_sleep" => {
                 let val = if enable { "1" } else { "0" };
-                let _ = run_powercfg(&["/setdcvalueindex", "scheme_current", "2e601130-5351-4d9d-8e04-252966bad054", "d502f7ee-1dc7-4efd-a55d-f04b6f5c0545", val]);
-                let _ = run_powercfg(&["/setacvalueindex", "scheme_current", "2e601130-5351-4d9d-8e04-252966bad054", "d502f7ee-1dc7-4efd-a55d-f04b6f5c0545", val]);
+                run_powercfg_checked(&["/setdcvalueindex", "scheme_current", "2e601130-5351-4d9d-8e04-252966bad054", "d502f7ee-1dc7-4efd-a55d-f04b6f5c0545", val])?;
+                run_powercfg_checked(&["/setacvalueindex", "scheme_current", "2e601130-5351-4d9d-8e04-252966bad054", "d502f7ee-1dc7-4efd-a55d-f04b6f5c0545", val])?;
             }
             "hibernate_30m" => {
                 let val = if enable { "30" } else { "0" };
-                let _ = run_powercfg(&["/change", "hibernate-timeout-dc", val]);
+                run_powercfg_checked(&["/change", "hibernate-timeout-dc", val])?;
             }
             _ => return Err(format!("Unknown SleepGuard option: {}", option)),
         }
-        let _ = run_powercfg(&["/setactive", "scheme_current"]);
+        run_powercfg_checked(&["/setactive", "scheme_current"])?;
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]

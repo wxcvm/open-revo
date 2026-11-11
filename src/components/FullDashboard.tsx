@@ -620,7 +620,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
                   className={`nav-tab ${slot.tabClassName} ${isActive ? 'active' : ''}`}
                 >
                   <IconComponent size={14} className={slot.iconClass || 'w-3.5 h-3.5'} />
-                  <span>{slot.name}</span>
+                  <span>{slot.id === 'gpu' && capabilities?.discrete_gpu === false ? '显示设置' : slot.name}</span>
                   {slot.renderBadge && slot.renderBadge({ status, isWaterCoolerEnabled, isCoolerConnected })}
                 </button>
               );
@@ -669,6 +669,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
               status={status}
               maxFanRpm={capabilities?.max_fan_rpm}
               fanControllable={capabilities?.fan_custom_curve === true}
+              nativeControl={capabilities?.id === 'mechrevo_xingyao_14_p916f_stx' && !status.vendor_bus_selected}
             />
           </ModuleErrorBoundary>
         )}
@@ -681,7 +682,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
 
         {activeTab === 'tuning' && (
           <ModuleErrorBoundary moduleName="电源管理" onNavigateToOverview={() => setActiveTab('overview')}>
-            <PowerTuningView />
+            <PowerTuningView sleepModeName={capabilities?.power_modes?.includes('office') === false ? '均衡' : '办公'} />
           </ModuleErrorBoundary>
         )}
 

@@ -52,3 +52,5 @@ pub fn get_hardware_hal() -> &'static dyn MechrevoHardwareHAL {
     get_hardware_driver()
 }
 
+
+pub use openrevo_core::hal::power_options;

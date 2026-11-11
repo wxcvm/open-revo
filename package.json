@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test:vendor-mqtt": "cargo test --locked --manifest-path tools/vendor-mqtt-tests/Cargo.toml -- --test-threads=1",
     "test:vendor-ui": "node tools/vendor-control-ui.test.cjs",
+    "test:native-capabilities": "node --test tools/native-capability-regression.test.cjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build --no-bundle"

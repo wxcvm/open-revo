@@ -41,6 +41,7 @@ export function useVendorControl<T>(
   probe: string,
   topic: string,
   parse: (json: Record<string, unknown>) => T | null,
+  enabled = true,
 ) {
   const [service, setService] = useState<VendorServiceState | null>(null);
   const [snapshot, setSnapshot] = useState<{ value: T; latency: number } | null>(null);
@@ -63,6 +64,10 @@ export function useVendorControl<T>(
     pending.current = null;
     setBusy(false);
     setChecking(false);
+    setService(null);
+    setSnapshot(null);
+    setError('');
+    if (!enabled) return () => { ++lifetime.current; };
     let disposed = false;
     let timer = 0;
     const tick = async () => {
@@ -110,7 +115,7 @@ export function useVendorControl<T>(
       if (lifetime.current === currentLifetime) ++lifetime.current;
       window.clearTimeout(timer);
     };
-  }, [probe, read]);
+  }, [probe, read, enabled]);
 
   // A broker can accept MQTT before its separate hardware worker is ready.
   // Only explicit connect/restart waits here; normal refresh stays bounded.
@@ -129,7 +134,7 @@ export function useVendorControl<T>(
   };
 
   const run = async (work: (active: () => boolean) => Promise<void>) => {
-    if (pending.current) return;
+    if (!enabled || pending.current) return;
     const operation = Symbol();
     const currentLifetime = lifetime.current;
     const active = () => lifetime.current === currentLifetime;

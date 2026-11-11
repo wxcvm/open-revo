@@ -3514,3 +3514,11 @@ body,
 .gpu-native-badge { flex-shrink: 0; border-radius: var(--radius-md); padding: 6px 10px; background: var(--status-ok-dim); color: var(--status-ok); }
 [data-theme="mono"] .gpu-native-icon, [data-theme="mono"] .gpu-native-badge { color: var(--text-primary); }
 @media (max-width: 680px) { .gpu-native-card { flex-wrap: wrap; } }
+
+/* Native controls follow the app palette (upstream 463a4a0). */
+:root { color-scheme: dark; }
+
+:root { --power-layout-gap: 9px; --power-battery-gap: 14px; }
+.power-options-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: var(--power-layout-gap); }
+.power-battery-layout { display: grid; grid-template-columns: 1.3fr 1fr; gap: var(--power-battery-gap); align-items: center; }
+.power-battery-layout.is-read-only { grid-template-columns: 1fr; }

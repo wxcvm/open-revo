@@ -5,6 +5,8 @@ import { RevBadge, RevSwitch } from './ui';
 import { ExtensionSlot } from './common/ExtensionSlot';
 
 interface PowerSettingsInfo {
+  supports_battery_limit: boolean;
+  supports_ec_power_options: boolean;
   battery_percent: number;
   is_ac_online: boolean;
   is_charging?: boolean;
@@ -26,9 +28,11 @@ interface PowerSettingsInfo {
   sleep_auto_office: boolean;
 }
 
-export const PowerTuningView: React.FC = () => {
+export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepModeName = '办公' }) => {
   const [powerInfo, setPowerInfo] = useState<PowerSettingsInfo>({
-    battery_percent: 100,
+    supports_battery_limit: false,
+    supports_ec_power_options: false,
+    battery_percent: 0,
     is_ac_online: true,
     is_charging: false,
     battery_mode: 'balance',
@@ -48,20 +52,22 @@ export const PowerTuningView: React.FC = () => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     invoke<PowerSettingsInfo>('get_power_settings')
       .then((res) => {
-        if (res) setPowerInfo(res);
+        if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
       })
-      .catch((e) => console.error('Failed to get power settings:', e));
+      .catch((e) => setError(String(e)));
 
     const timer = setInterval(() => {
       invoke<PowerSettingsInfo>('get_power_settings')
         .then((res) => {
-          if (res) setPowerInfo(res);
+          if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
         })
-        .catch(() => { });
+        .catch((e) => setError(String(e)));
     }, 5000);
     return () => clearInterval(timer);
   }, []);
@@ -69,12 +75,12 @@ export const PowerTuningView: React.FC = () => {
   const handleSelectBatteryMode = async (mode: string) => {
     if (loading) return;
     setLoading(true);
-    setPowerInfo((prev) => ({ ...prev, battery_mode: mode }));
     try {
       const res = await invoke<PowerSettingsInfo>('set_battery_mode', { mode });
-      if (res) setPowerInfo(res);
+      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
     } catch (e) {
       console.error('Failed to set battery mode:', e);
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -91,13 +97,13 @@ export const PowerTuningView: React.FC = () => {
     } as const;
 
     const nextVal = !powerInfo[keyMap[option]];
-    setPowerInfo((prev) => ({ ...prev, [keyMap[option]]: nextVal }));
 
     try {
       const res = await invoke<PowerSettingsInfo>('set_power_option', { option, enable: nextVal });
-      if (res) setPowerInfo(res);
+      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
     } catch (e) {
       console.error(`Failed to toggle ${option}:`, e);
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -119,13 +125,13 @@ export const PowerTuningView: React.FC = () => {
     } as const;
 
     const nextVal = !powerInfo[keyMap[option]];
-    setPowerInfo((prev) => ({ ...prev, [keyMap[option]]: nextVal }));
 
     try {
       const res = await invoke<PowerSettingsInfo>('set_sleep_guard_option', { option, enable: nextVal });
-      if (res) setPowerInfo(res);
+      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
     } catch (e) {
       console.error(`Failed to toggle sleep guard option ${option}:`, e);
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -135,22 +141,14 @@ export const PowerTuningView: React.FC = () => {
     if (loading) return;
     setLoading(true);
     const nextVal = !powerInfo.sleep_guard_enabled;
-    setPowerInfo((prev) => ({
-      ...prev,
-      sleep_guard_enabled: nextVal,
-      sleep_disconnect_net: nextVal,
-      sleep_block_away: nextVal,
-      sleep_ignore_sysreq: nextVal,
-      sleep_disable_wake_timers: nextVal,
-      sleep_deep_sleep: nextVal,
-      sleep_hibernate_30m: nextVal,
-    }));
+
 
     try {
       const res = await invoke<PowerSettingsInfo>('set_master_sleep_guard', { enable: nextVal });
-      if (res) setPowerInfo(res);
+      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
     } catch (e) {
       console.error('Failed to set master sleep guard:', e);
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -160,20 +158,23 @@ export const PowerTuningView: React.FC = () => {
     if (loading) return;
     setLoading(true);
     const nextVal = !powerInfo.sleep_auto_office;
-    setPowerInfo((prev) => ({ ...prev, sleep_auto_office: nextVal }));
 
     try {
       const res = await invoke<PowerSettingsInfo>('set_sleep_auto_office', { enable: nextVal });
-      if (res) setPowerInfo(res);
+      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
     } catch (e) {
       console.error('Failed to set auto office on sleep:', e);
+      setError(String(e));
     } finally {
       setLoading(false);
     }
   };
 
+  if (!loaded) return <div className="quick-row" role="status">{error || '正在读取电源状态…'}</div>;
+
   return (
     <div className="power-view-container">
+      {error && <div className="quick-row" role="alert">{error}</div>}
       {/* 1. Top Header Bar with Auto Office Checkbox */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -185,23 +186,23 @@ export const PowerTuningView: React.FC = () => {
               电源与电池管理 (Power & Battery Management)
             </div>
             <div style={{ fontSize: '10.5px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-              主板硬件充放电控制 · 电池健康长寿模式 · 关机反向供电
+              {powerInfo.supports_battery_limit ? '硬件电池控制与 Windows 电源策略' : 'Windows 电源策略与实时电池状态'}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Top Middle: 睡眠时自动进入办公模式 */}
+          {/* Top Middle: 睡眠前切换{sleepModeName}模式 */}
           <div
             onClick={handleToggleAutoOffice}
             className={`sleep-office-mode-card ${powerInfo.sleep_auto_office ? 'active' : ''}`}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
               <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', lineHeight: '1.25' }}>
-                睡眠时自动进入办公模式
+                睡眠前切换{sleepModeName}模式
               </div>
               <div style={{ fontSize: '9.5px', color: 'var(--text-dim)', whiteSpace: 'nowrap', lineHeight: '1.25' }}>
-                合盖前自动降频限功耗 · 防狂暴模式带热入睡
+                合盖前请求固件低功耗档位，唤醒后恢复
               </div>
             </div>
             <RevSwitch
@@ -213,7 +214,7 @@ export const PowerTuningView: React.FC = () => {
           </div>
 
           {/* Top Right: 预留微插槽位 (锁定充电上限插件) */}
-          <ExtensionSlot name="power.hardware_limit" style={{ width: 'auto' }} />
+          {powerInfo.supports_battery_limit && <ExtensionSlot name="power.hardware_limit" style={{ width: 'auto' }} />}
         </div>
       </div>
 
@@ -240,10 +241,10 @@ export const PowerTuningView: React.FC = () => {
                 <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-primary)' }}>
                   智能睡眠守护 / 背包防烫模式 (Anti-Overheat Sleep Guard)
                 </span>
-                <RevBadge variant="accent">推荐全开</RevBadge>
+                <RevBadge variant="accent">按需启用</RevBadge>
               </div>
               <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                封杀 Windows 现代待机后台偷跑；杜绝密闭背包发烫、电池偷耗以及合盖睡死黑屏无法唤醒。
+                调整 Windows 待机与唤醒策略；实际节能及恢复效果取决于系统、驱动与固件。
               </div>
             </div>
           </div>
@@ -405,13 +406,13 @@ export const PowerTuningView: React.FC = () => {
             电源与供电选项
           </div>
           <div style={{ fontSize: '9.5px', color: 'var(--text-dim)' }}>
-            主板硬件 EC 寄存器底层配置
+            {powerInfo.supports_ec_power_options ? '硬件供电选项与 Windows 电源模式' : 'Windows 电源模式联动'}
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '9px' }}>
+        <div className="power-options-layout">
           {/* Option 1: 关机 USB 供电 */}
-          <div
+          {powerInfo.supports_ec_power_options && <div
             className="power-subtle-card"
             style={{
               padding: '7px 10px',
@@ -435,10 +436,10 @@ export const PowerTuningView: React.FC = () => {
             <div style={{ fontSize: '9.5px', color: 'var(--text-dim)', lineHeight: '1.35' }}>
               可在关机或休眠状态下支持USB端口持续供电，方便为手机或外设应急充电。
             </div>
-          </div>
+          </div>}
 
           {/* Option 2: 来电自动开机 */}
-          <div
+          {powerInfo.supports_ec_power_options && <div
             className="power-subtle-card"
             style={{
               padding: '7px 10px',
@@ -462,7 +463,7 @@ export const PowerTuningView: React.FC = () => {
             <div style={{ fontSize: '9.5px', color: 'var(--text-dim)', lineHeight: '1.35' }}>
               开启后在关机状态下，接通外部电源适配器瞬间主板自动开机启动系统。
             </div>
-          </div>
+          </div>}
 
           {/* Option 3: 高性能电源模式 */}
           <div
@@ -498,7 +499,7 @@ export const PowerTuningView: React.FC = () => {
               />
             </div>
             <div style={{ fontSize: '9.5px', color: 'var(--text-dim)', lineHeight: '1.35' }}>
-              开启后根据四大模式自动调整 Windows 系统电源模式；关闭后切换模式不影响系统电源模式。
+              开启后根据当前性能档位同步 Windows 电源模式；关闭后不随档位切换。
             </div>
           </div>
         </div>
@@ -508,16 +509,16 @@ export const PowerTuningView: React.FC = () => {
       <div className="glass-card" style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-            电池健康
+            {powerInfo.supports_battery_limit ? '电池健康' : '电池状态'}
           </div>
           <div style={{ fontSize: '9.5px', color: 'var(--text-dim)' }}>
-            主板硬件级充电控制 · 电池健康长寿模式
+            {powerInfo.supports_battery_limit ? '硬件充电限制' : '实时电量与供电状态'}
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '14px', alignItems: 'center' }}>
+        <div className={`power-battery-layout ${powerInfo.supports_battery_limit ? '' : 'is-read-only'}`}>
           {/* Left: 3 Radio Modes with Exact OEM Copy */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {powerInfo.supports_battery_limit && <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {/* Mode 1: 长效模式 */}
             <div
               onClick={() => handleSelectBatteryMode('long_life')}
@@ -580,7 +581,7 @@ export const PowerTuningView: React.FC = () => {
                 </div>
               </div>
             </div>
-          </div>
+          </div>}
 
           {/* Right: Real-time Animated Battery Gauge */}
           <div className="battery-gauge-box">

@@ -105,7 +105,8 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
     }
   };
 
-  const vendor = useVendorControl('vendor_probe_keyboard', 'Setting/Status', parseKeyboard);
+  const nativeControl = capabilities?.id === 'mechrevo_xingyao_14_p916f_stx' && !status.vendor_bus_selected;
+  const vendor = useVendorControl('vendor_probe_keyboard', 'Setting/Status', parseKeyboard, !nativeControl);
   const keyboard = vendor.snapshot?.value;
   const vendorBusy = vendor.busy || vendor.checking;
   const timerPresets = [10, 15, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600, 7200, 10800, 0];
@@ -615,7 +616,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
           </div>
 
           {/* 解除离电限制 (允许电池下启用狂暴与自定义) */}
-          <div className="quick-row" style={{ alignItems: 'center' }}>
+          {capabilities?.form_factor !== 'thin_light' && capabilities?.discrete_gpu !== false && <div className="quick-row" style={{ alignItems: 'center' }}>
             <div>
               <div className="sys-row-label">
                 <span>解除离电限制</span>
@@ -635,7 +636,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
                 onChange={handleToggleUnlockBattery}
               />
             </div>
-          </div>
+          </div>}
 
           {/* 唤醒面板形态 */}
           <div className="quick-row" style={{ alignItems: 'center' }}>

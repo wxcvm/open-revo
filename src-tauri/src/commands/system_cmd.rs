@@ -250,6 +250,9 @@ pub fn set_unlock_battery_power_limit(
     app: AppHandle,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<bool, String> {
+    if crate::commands::power_cmd::is_thin_and_light_or_pure_igpu() {
+        return Err("本机原生性能模式不受此离电限制开关控制".into());
+    }
     let mut cfg = crate::system::config::load_config();
     cfg.unlock_battery_power_limit = enable;
     crate::system::config::save_config(&cfg);

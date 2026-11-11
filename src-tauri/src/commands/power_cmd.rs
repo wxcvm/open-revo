@@ -6,6 +6,8 @@ use crate::driver::ec_bridge::SharedEcBridge;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct PowerSettingsInfo {
+    pub supports_battery_limit: bool,
+    pub supports_ec_power_options: bool,
     pub battery_percent: u8,
     pub is_ac_online: bool,
     pub is_charging: bool,           // Real hardware charging state (Win32 BatteryFlag & 0x08)
@@ -278,6 +280,7 @@ pub fn set_power_mode(mode: u8, app: AppHandle, ec_state: State<'_, SharedEcBrid
         } else {
             crate::log_info!("POWER_CMD", "Direct HAL applied performance mode {:?}", hw_mode);
         }
+        crate::system::power_mode::apply_windows_power_overlay(mode);
         ec_state.lock().set_power_mode_from_hardware(mode);
         if mode == 4 {
             if cfg.custom_profile.fan_isolated_output || cfg.custom_profile.fan_curve_enabled {
@@ -371,6 +374,8 @@ pub fn get_power_settings(
     let cfg = crate::system::config::load_config();
     let (percent, _, is_charging) = get_live_power_status();
     let is_dc = is_dc_round_plugged_in();
+    let supports_battery_limit = crate::driver::wmi_ec::get_hardware_support_flags().has_battery_limit;
+    let supports_ec_power_options = crate::hal::platform_probe::needs_acpi_kernel_driver();
     let hw_limit = ec_state.lock().get_battery_limit();
     let effective_limit = if hw_limit > 0 { hw_limit } else { cfg.battery_limit };
     let mode = if effective_limit >= 95 {
@@ -381,29 +386,14 @@ pub fn get_power_settings(
         "balance".to_string()
     };
 
-    let usb_charge = if let Some(v) = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE) {
-        let is_on = (v & crate::driver::wmi_ec::TRIGGER_USB_CHARGE) != 0;
-        if cfg.usb_charge_enabled && !is_on {
-            crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE, v | crate::driver::wmi_ec::TRIGGER_USB_CHARGE);
-            true
-        } else {
-            is_on
-        }
-    } else {
-        cfg.usb_charge_enabled
-    };
-
-    let ac_recovery = if let Some(v) = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY) {
-        let is_on = (v & crate::driver::wmi_ec::AC_RECOVERY_BITMASK) != 0;
-        if cfg.ac_recovery_enabled && !is_on {
-            crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY, v | crate::driver::wmi_ec::AC_RECOVERY_BITMASK);
-            true
-        } else {
-            is_on
-        }
-    } else {
-        cfg.ac_recovery_enabled
-    };
+    // Upstream 146ca47: a status query never writes or "self-heals" hardware.
+    // Do not even read unrelated legacy registers on native WMI platforms.
+    let usb_charge = supports_ec_power_options && crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE)
+        .map(|value| cfg.usb_charge_enabled || value & crate::driver::wmi_ec::TRIGGER_USB_CHARGE != 0)
+        .unwrap_or(cfg.usb_charge_enabled);
+    let ac_recovery = supports_ec_power_options && crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY)
+        .map(|value| cfg.ac_recovery_enabled || value & crate::driver::wmi_ec::AC_RECOVERY_BITMASK != 0)
+        .unwrap_or(cfg.ac_recovery_enabled);
 
 #[cfg(target_os = "windows")]
 fn get_active_power_scheme_guid() -> String {
@@ -582,6 +572,8 @@ pub fn query_sleep_guard_registry_states(cfg: &crate::system::config::AppConfig)
     ) = query_sleep_guard_registry_states(&cfg);
 
     PowerSettingsInfo {
+        supports_battery_limit,
+        supports_ec_power_options,
         battery_percent: percent,
         is_ac_online: is_dc,
         is_charging,
@@ -628,7 +620,7 @@ pub fn set_sleep_guard_option(
         "hibernate_30m" => cfg.sleep_hibernate_30m = enable,
         _ => return Err("Invalid sleep guard option".into()),
     }
-    apply_sleep_guard_powercfg(&option, enable);
+    crate::system::power::ppm::apply_sleep_guard_option(&option, enable)?;
     crate::system::config::save_config(&cfg);
     Ok(get_power_settings(ec_state))
 }
@@ -646,7 +638,10 @@ pub fn set_master_sleep_guard(
     cfg.sleep_disable_wake_timers = enable;
     cfg.sleep_deep_sleep = enable;
     cfg.sleep_hibernate_30m = enable;
-    apply_all_sleep_guard(enable);
+    for option in ["disconnect_net", "block_away", "ignore_sysreq", "disable_wake_timers", "deep_sleep", "hibernate_30m"] {
+        crate::system::power::ppm::apply_sleep_guard_option(option, enable)
+            .map_err(|error| format!("{error}；部分策略可能已应用，请刷新状态"))?;
+    }
     crate::system::config::save_config(&cfg);
     Ok(get_power_settings(ec_state))
 }
@@ -667,6 +662,9 @@ pub fn set_battery_mode(
     mode: String,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<PowerSettingsInfo, String> {
+    if !crate::driver::wmi_ec::get_hardware_support_flags().has_battery_limit {
+        return Err("当前机型未适配充电上限控制".into());
+    }
     let limit = match mode.as_str() {
         "long_life" => 100,
         "station" => 60,
@@ -688,6 +686,9 @@ pub fn set_battery_hardware_limit(
     enable: bool,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<PowerSettingsInfo, String> {
+    if !crate::driver::wmi_ec::get_hardware_support_flags().has_battery_limit {
+        return Err("当前机型未适配充电上限控制".into());
+    }
     let mut cfg = crate::system::config::load_config();
     cfg.battery_hardware_limit_enabled = enable;
     crate::system::config::save_config(&cfg);
@@ -705,28 +706,20 @@ pub fn set_power_option(
 ) -> Result<PowerSettingsInfo, String> {
     let mut cfg = crate::system::config::load_config();
     match option.as_str() {
-        "usb_charge" => {
-            cfg.usb_charge_enabled = enable;
-            if let Some(mut val) = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE) {
-                if enable { val |= crate::driver::wmi_ec::TRIGGER_USB_CHARGE; } else { val &= !crate::driver::wmi_ec::TRIGGER_USB_CHARGE; }
-                crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE, val);
-            } else {
-                crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_TRIGGER_BYTE, if enable { crate::driver::wmi_ec::TRIGGER_USB_CHARGE } else { 0x00 });
+        "usb_charge" | "ac_recovery" => {
+            if !crate::hal::platform_probe::needs_acpi_kernel_driver() {
+                return Err("当前机型未适配此硬件供电选项".into());
             }
-        }
-        "ac_recovery" => {
-            cfg.ac_recovery_enabled = enable;
-            if let Some(mut val) = crate::driver::wmi_ec::wmi_read_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY) {
-                if enable { val |= crate::driver::wmi_ec::AC_RECOVERY_BITMASK; } else { val &= !crate::driver::wmi_ec::AC_RECOVERY_BITMASK; }
-                crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY, val);
-            } else {
-                crate::driver::wmi_ec::wmi_write_ec(crate::driver::wmi_ec::ADDR_AC_RECOVERY, if enable { crate::driver::wmi_ec::AC_RECOVERY_BITMASK } else { 0x00 });
-            }
+            crate::hal::power_options::apply_ec_option(
+                &option, enable, crate::driver::wmi_ec::wmi_modify_ec_mask,
+            )?;
+            if option == "usb_charge" { cfg.usb_charge_enabled = enable; }
+            else { cfg.ac_recovery_enabled = enable; }
         }
         "high_perf" => {
             cfg.high_perf_scheme = enable;
             if enable {
-                crate::system::power_mode::apply_windows_power_overlay(cfg.power_mode);
+                crate::system::power_mode::set_windows_power_overlay(cfg.power_mode)?;
             }
         }
         _ => return Err("Invalid power option".into()),

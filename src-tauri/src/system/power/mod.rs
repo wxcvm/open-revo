@@ -147,6 +147,8 @@ pub fn apply_full_power_mode(ui_mode: u8) {
         let mode = if ui_mode == 1 { 2 } else { ui_mode };
         if let Err(error) = crate::hal::xingyao::set_mode(mode) {
             crate::log_warn!("POWER_MODE", "Native mode request not confirmed: {}", error);
+        } else {
+            apply_windows_power_overlay(mode);
         }
         return;
     }
@@ -173,6 +175,12 @@ pub fn apply_windows_power_overlay(ui_mode: u8) {
         return;
     }
 
+    if let Err(error) = set_windows_power_overlay(ui_mode) {
+        crate::log_warn!("POWER_MODE", "{}", error);
+    }
+}
+
+pub fn set_windows_power_overlay(ui_mode: u8) -> Result<(), String> {
     let is_thin_light = crate::commands::power_cmd::is_thin_and_light_or_pure_igpu();
     let (guid_ptr, name) = match ui_mode {
         1 => {
@@ -189,13 +197,8 @@ pub fn apply_windows_power_overlay(ui_mode: u8) {
     };
 
     let ret = set_active_overlay_scheme(guid_ptr);
-    if ret == 0 {
-        crate::log_info!("POWER_MODE", "PowerSetActiveOverlayScheme succeeded for mode {} ({})", ui_mode, name);
-        crate::log_info!("CUSTOM_TRACE", "PowerSetActiveOverlayScheme succeeded for mode {} ({})", ui_mode, name);
-    } else {
-        crate::log_warn!("POWER_MODE", "PowerSetActiveOverlayScheme failed with code {} for mode {} ({})", ret, ui_mode, name);
-        crate::log_warn!("CUSTOM_TRACE", "PowerSetActiveOverlayScheme failed with code {} for mode {} ({})", ret, ui_mode, name);
-    }
+    if ret != 0 { return Err(format!("Windows 电源模式设置失败：{ret} ({name})")); }
+    Ok(())
 }
 
 /// DEPRECATED: Retained as a safe no-op to ensure backwards compatibility.
@@ -211,7 +214,7 @@ pub fn spawn_hardware_state_restore(ec_for_restore: crate::driver::ec_bridge::Sh
         let cfg = {
             let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
             let cfg = crate::system::config::load_config();
-            if cfg.takeover_oem {
+            if cfg.takeover_oem && (!crate::hal::xingyao::is_active() || crate::system::process::is_oem_installed()) {
                 let _ = crate::system::service_mgr::pause_oem_services();
             }
             cfg

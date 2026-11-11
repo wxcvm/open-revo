@@ -140,6 +140,7 @@ export const DrawerLightingCard: React.FC<DrawerLightingCardProps> = ({
 
 
   useEffect(() => {
+    if (capabilities?.rgb_keyboard?.supported === false) return;
     const fetchLighting = () => {
       invoke<KeyboardHardwareInfo>('get_keyboard_hardware_info')
         .then((info) => {

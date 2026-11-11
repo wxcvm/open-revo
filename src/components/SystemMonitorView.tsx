@@ -11,20 +11,10 @@ interface SystemMonitorViewProps {
   maxFanRpm?: number;
   /** 该机型 manifest 是否声明了风扇调速能力（fan_custom_curve / set_fan 动作） */
   fanControllable?: boolean;
+  nativeControl?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1200;
-const DEFAULT_FAN_CEILING = 6000;
-
-/** 浏览器预览 / 后端尚未编译新命令时的演示快照 */
-const DEMO_STATS: SystemStats = {
-  mem: { total_mb: 32051, used_mb: 27136, free_mb: 4915, usage: 85, percent_load: 85 },
-  disks: [
-    { letter: 'C:', label: '系统', fs: 'NTFS', total_gb: 299.0, used_gb: 220.1, free_gb: 78.9, usage: 74, is_system: true },
-    { letter: 'D:', label: '数据', fs: 'NTFS', total_gb: 652.9, used_gb: 174.5, free_gb: 478.4, usage: 27, is_system: false },
-  ],
-};
-
 const clampPct = (value: number) => (Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0);
 const toGb = (mb: number) => (Number.isFinite(mb) ? Math.max(0, mb) / 1024 : 0);
 const fmtGb = (value: number) => value.toFixed(1);
@@ -35,9 +25,10 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   status,
   maxFanRpm,
   fanControllable = false,
+  nativeControl = false,
 }) => {
   const [stats, setStats] = useState<SystemStats | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
+  const [statsUnavailable, setStatsUnavailable] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,11 +37,11 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
         const snapshot = await invoke<SystemStats>('get_system_stats');
         if (!alive) return;
         setStats(snapshot);
-        setIsDemo(false);
+        setStatsUnavailable(false);
       } catch {
         if (!alive) return;
-        setStats((prev) => prev ?? DEMO_STATS);
-        setIsDemo(true);
+        setStats(null);
+        setStatsUnavailable(true);
       }
     };
     void sample();
@@ -63,7 +54,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
     };
   }, []);
 
-  const vendor = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
+  const vendor = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost, !nativeControl);
   const vendorBoost = vendor.snapshot?.value;
   const boost = vendorBoost ?? (status.vendor_bus_selected ? undefined : status.fan_boost);
 
@@ -87,13 +78,13 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const memPct = clampPct(mem?.usage ?? 0);
   const disks = stats?.disks ?? [];
 
-  const fanCeiling = maxFanRpm && maxFanRpm > 0 ? maxFanRpm : DEFAULT_FAN_CEILING;
+  const fanCeiling = maxFanRpm && maxFanRpm > 0 ? maxFanRpm : 0;
   const cpuFan = status.cpu_fan_rpm ?? 0;
   const gpuFan = status.gpu_fan_rpm ?? 0;
   // Dual-fan iGPU models expose an auxiliary chassis fan, not a dedicated GPU fan.
   const hasGpuFanChannel = hasDedicatedVram || gpuFan > 0;
-  const cpuFanPct = clampPct((cpuFan / fanCeiling) * 100);
-  const gpuFanPct = clampPct((gpuFan / fanCeiling) * 100);
+  const cpuFanPct = fanCeiling ? clampPct((cpuFan / fanCeiling) * 100) : 0;
+  const gpuFanPct = fanCeiling ? clampPct((gpuFan / fanCeiling) * 100) : 0;
 
   return (
     <div className="sys-monitor">
@@ -103,9 +94,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           <span>系统监控</span>
         </div>
         <div className="sys-monitor-badges">
-          <span className={isDemo ? 'sys-monitor-badge is-demo' : 'sys-monitor-badge'}>
+          <span className={statsUnavailable ? 'sys-monitor-badge is-demo' : 'sys-monitor-badge'}>
             <span className="live-dot" />
-            {isDemo ? '演示数据' : 'LIVE · 1.2s'}
+            {statsUnavailable ? '监控不可用' : 'LIVE · 1.2s'}
           </span>
         </div>
       </div>
@@ -277,7 +268,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
               <span>风扇转速</span>
             </div>
             <div className="mon-card-tag">
-              {cpuFan === 0 && gpuFan === 0 ? 'EC 未映射' : `${maxFanRpm ? '上限' : '参考'} ${fanCeiling} RPM`}
+              {fanCeiling ? `上限 ${fanCeiling} RPM` : '实时转速'}
             </div>
           </div>
 
@@ -285,10 +276,10 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
             <div className="mon-row-head">
               <span className="mon-row-label">处理器</span>
               <span className="mon-row-value">
-                {cpuFan > 0 ? `${cpuFan} RPM · 约 ${Math.round(cpuFanPct)}%` : '-- RPM'}
+                {cpuFan > 0 ? `${cpuFan} RPM${fanCeiling ? ` · 约 ${Math.round(cpuFanPct)}%` : ''}` : '-- RPM'}
               </span>
             </div>
-            <RevTickBar value={cpuFanPct} />
+            {fanCeiling > 0 && <RevTickBar value={cpuFanPct} />}
           </div>
 
           {hasGpuFanChannel && (
@@ -297,7 +288,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
                 <span className="mon-row-label">{hasDedicatedVram ? '显卡' : '辅助风扇'}</span>
                 <span className="mon-row-value">{gpuFan > 0 ? `${gpuFan} RPM` : '-- RPM'}</span>
               </div>
-              <RevTickBar value={gpuFanPct} />
+              {fanCeiling > 0 && <RevTickBar value={gpuFanPct} />}
             </div>
           )}
 
@@ -307,9 +298,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           </div>
 
           <div className="mon-plain">
-            <span className="mon-plain-label">厂商通道</span>
+            <span className="mon-plain-label">控制通道</span>
             <span className={vendor.snapshot ? 'mon-plain-value is-ok' : 'mon-plain-value'}>
-              {vendor.snapshot ? `在线 · ${vendor.snapshot.latency} ms`
+              {nativeControl ? '原生 WMI · 无需官方后台' : vendor.snapshot ? `在线 · ${vendor.snapshot.latency} ms`
                 : vendor.service?.selected === false ? '未启用 · 当前使用本地硬件通道'
                 : vendor.service?.present ? (vendor.service.running ? '后台运行中 · 尚未收到风扇状态' : '厂商后台未运行')
                 : vendor.service ? '未安装厂商后台' : '正在检查…'}
@@ -366,7 +357,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
                 ? '厂商强冷请求（由固件执行）'
                 : fanControllable
                   ? '本机型可调（电源管理 → 风扇曲线）'
-                  : 'EC 自动（未接入调速协议）'}
+                  : '固件自动温控'}
             </span>
           </div>
         </section>
@@ -374,7 +365,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
       <div className="sys-monitor-foot">
         <span>采样间隔 1.2 s · 数据源 CPU/RAM/卷容量</span>
-        <span>{status.model_name || 'OpenRevo'} · {isDemo ? 'DEMO' : 'LIVE'}</span>
+        <span>{status.model_name || 'OpenRevo'} · {statsUnavailable ? 'UNAVAILABLE' : 'LIVE'}</span>
       </div>
     </div>
   );

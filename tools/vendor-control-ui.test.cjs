@@ -20,6 +20,8 @@ import { useVendorControl, parseFanBoost } from '/src/state/vendorControl.ts';
 import { SystemSettingsView } from '/src/components/SystemSettingsView.tsx';
 import { ModeSelector } from '/src/components/ModeSelector.tsx';
 import { MiniDrawer } from '/src/components/MiniDrawer.tsx';
+import { PowerTuningView } from '/src/components/PowerTuningView.tsx';
+import { SystemMonitorView } from '/src/components/SystemMonitorView.tsx';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 function Fixture() {
   const control = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost);
@@ -31,7 +33,7 @@ window.unmount = () => root.render(null);
 window.mountNative = () => root.render(React.createElement(React.Fragment, null,
   React.createElement(SystemSettingsView, {
     status: {vendor_bus_selected:false},
-    capabilities: {power_modes:['balance','turbo'], rgb_keyboard: {
+    capabilities: {id:'mechrevo_xingyao_14_p916f_stx',form_factor:'thin_light',discrete_gpu:false,power_modes:['balance','turbo'], rgb_keyboard: {
       sleep_timeout_supported:true, timeout_options_seconds:[0,10,15,20,30,45,60,120,300,600,1200,1800,3600,7200,10800]}},
     osdConfig:{enabled:false,theme:'fade',scale:'1',position:'top-left'}, onUpdateOsdConfig(){},onToggleAutostart(){}
   }),
@@ -46,6 +48,11 @@ window.mountMini = () => root.render(React.createElement(MiniDrawer, {
   onSetPowerMode(){},onToggleFanBoost(){},onToggleBatteryLimit(){},onSwitchRefreshRate(){},onToggleWinKey(){},
   onToggleAutostart(){},async onToggleOemService(){},onExpandDashboard(){},onOpenSponsor(){},onMinimize(){},onClose(){}
 }));
+window.mountPower = () => root.render(React.createElement(PowerTuningView, {sleepModeName:'均衡'}));
+window.mountMonitor = () => root.render(React.createElement(SystemMonitorView, {
+  nativeControl:true, status:{cpu_fan_rpm:3000,gpu_fan_rpm:2800,vendor_bus_selected:false,
+    support_flags:{has_fan_boost:false},gpu_name:'AMD Radeon 880M'}
+}));
 window.mount();
 </script></body></html>`);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
@@ -55,10 +62,18 @@ window.mount();
     await page.route('**/fixture.html', route => route.fulfill({ contentType: 'text/html', body: html }));
     await page.addInitScript(() => {
       const f = window.fixture = { calls: [], running: true, failProbe: true, failWrite: false, boost: false,
-        deferConnect: false, deferProbe: false, probeReleases: [], selected:true, timer:600 };
+        deferConnect: false, deferProbe: false, probeReleases: [], selected:true, timer:600,
+        failStats:false,failPowerWrite:false,power:{supports_battery_limit:false,supports_ec_power_options:false,
+          battery_percent:65,is_ac_online:true,high_perf_scheme:false,sleep_auto_office:false,sleep_guard_enabled:false} };
       window.__TAURI_INTERNALS__ = { transformCallback() {return 1;}, async invoke(name, args) {
         f.calls.push(name);
         const state = () => ({ present: true, selected: f.selected, running: f.running, auto_start: true });
+        if (name === 'get_system_stats') { if(f.failStats) throw new Error('sensor unavailable'); return null; }
+        if (name === 'get_power_settings') return f.power;
+        if (name === 'set_power_option') {
+          if(f.failPowerWrite) throw new Error('power write rejected');
+          f.power.high_perf_scheme=args.enable;return f.power;
+        }
         if (name === 'get_keyboard_sleep_timeout') return f.timer;
         if (name === 'set_keyboard_sleep_timeout') {
           if (f.failWrite) throw new Error('native readback mismatch');
@@ -129,6 +144,7 @@ window.mount();
     console.log('PASS StrictMode remount: new lifetime receives its own snapshot and releases pending state');
 
     const probes = await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_probe_keyboard').length);
+    const serviceChecks = await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_service_state').length);
     await page.evaluate(() => {
       window.fixture.selected=false; window.fixture.running=false; window.fixture.failWrite=false;
       window.mountNative();
@@ -143,6 +159,8 @@ window.mount();
     await page.getByRole('alert').filter({hasText:'native readback mismatch'}).waitFor();
     assert.equal(await timer.inputValue(), '1200');
     assert.equal(await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_probe_keyboard').length), probes);
+    assert.equal(await page.evaluate(() => window.fixture.calls.filter(x => x === 'vendor_service_state').length), serviceChecks);
+    assert.equal(await page.getByText('解除离电限制',{exact:true}).count(),0);
     assert.equal(await page.getByRole('button', {name:/办公/}).count(), 0);
     console.log('PASS native UI: 15 timeout options, confirmed values only, two physical modes, no OEM probes');
     await page.evaluate(() => {window.fixture.timer=600; window.fixture.failWrite=false; window.mountMini();});
@@ -156,7 +174,38 @@ window.mount();
     await miniTimer.selectOption('15');
     await page.getByRole('alert').filter({hasText:'native readback mismatch'}).waitFor();
     assert.equal(await miniTimer.inputValue(),'1200');
+    assert.equal(await page.evaluate(() => window.fixture.calls.filter(x => x === 'get_lighting_status' || x === 'get_keyboard_hardware_info').length),0);
     console.log('PASS mini UI: unsupported charging controls hidden; native timer has all presets and rejects false success');
+
+    await page.evaluate(() => {window.mountPower();});
+    await page.getByText('Windows 电源策略与实时电池状态').waitFor();
+    assert.equal(await page.getByText('来电自动开机 (AC Recovery)',{exact:true}).count(),0);
+    assert.equal(await page.getByText('关机下使用USB给电',{exact:true}).count(),0);
+    assert.equal(await page.getByText('长效模式',{exact:true}).count(),0);
+    await page.getByText('睡眠前切换均衡模式',{exact:true}).waitFor();
+    await page.evaluate(() => {window.fixture.failPowerWrite=true;});
+    await page.getByText('高性能电源模式',{exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'power write rejected'}).waitFor();
+    const powerSwitch=page.getByText('高性能电源模式',{exact:true}).locator('xpath=../../..').getByRole('switch');
+    assert.equal(await powerSwitch.getAttribute('aria-checked'),'false');
+    console.log('PASS power page: native unsupported EC/charge controls removed; Windows policy remains; failed write stays off');
+
+    await page.evaluate(() => {window.fixture.power.supports_battery_limit=true;window.fixture.power.supports_ec_power_options=true;window.mountMini();});
+    await miniTimer.waitFor();
+    await page.evaluate(() => window.mountPower());
+    await page.getByText('来电自动开机 (AC Recovery)',{exact:true}).waitFor();
+    await page.getByText('长效模式',{exact:true}).waitFor();
+    console.log('PASS other models: supported hardware controls retained');
+
+    const checksBeforeMonitor=await page.evaluate(() => window.fixture.calls.filter(x=>x==='vendor_service_state').length);
+    await page.evaluate(() => {window.fixture.failStats=true;window.mountMonitor();});
+    await page.getByText('监控不可用',{exact:true}).waitFor();
+    await page.getByText('3000 RPM',{exact:true}).waitFor();
+    assert.equal((await page.locator('body').innerText()).includes('6000 RPM'),false);
+    assert.equal((await page.locator('body').innerText()).includes('299.0'),false);
+    assert.equal(await page.evaluate(() => window.fixture.calls.filter(x=>x==='vendor_service_state').length),checksBeforeMonitor);
+    await page.getByText('原生 WMI · 无需官方后台',{exact:true}).waitFor();
+    console.log('PASS monitor: no OEM polling, fabricated demo storage or unverified fan maximum');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
