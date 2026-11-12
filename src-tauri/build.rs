@@ -419,6 +419,9 @@ fn main() {
     {
         println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
+        // Bin targets already receive Tauri's resource manifest (including the
+        // admin execution level). Do not generate a duplicate resource #1.
+        println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
     }
     generate_hardware_vault();
 

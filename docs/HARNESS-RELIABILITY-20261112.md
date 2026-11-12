@@ -38,11 +38,18 @@ separation. Automated scene selection no longer rewrites manual AC/DC defaults.
   also pass in the isolated production-module test crate.
 - Production display checkpoint roundtrip on the internal panel:
   `30 -> 60 -> 120 -> 60 -> original`, with exact snapshot and ownership checks.
+- Production native scene engine/adapter roundtrip: firmware `3 -> 2 -> 3`,
+  Windows energy changed to balanced and restored to the prior GUID. Independent
+  reads passed; the live configuration SHA-256 was unchanged. This is adapter
+  acceptance, not a claim that UI persistence or AC cable transitions were tested.
 - Root lib usage-profile tests now execute and pass. The former `0xc0000139`
   loader failure was traced to the missing Common-Controls v6 activation manifest
   in unit-test executables, which import `TaskDialogIndirect`. MSVC link arguments
   supply the dependency; an integration test checks that export under activation.
   `rustc-link-arg-tests` alone was tested and does not fix lib unit-test targets.
+  Generic manifest generation is explicitly disabled again for bin targets,
+  which retain Tauri's existing administrator resource manifest; otherwise MSVC
+  reports duplicate manifest resource #1.
 - Targeted browser and source-contract checks remain separate from hardware
   acceptance. We do not run unrelated tests that purge live AppData.
 

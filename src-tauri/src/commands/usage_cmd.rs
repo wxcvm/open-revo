@@ -268,4 +268,32 @@ mod tests {
         }
         assert_ne!(guid_bytes(power::GUID_OFFICE_SAVER), guid_bytes(power::GUID_BALANCED));
     }
+    #[test]
+    #[ignore = "Temporarily changes native firmware/Windows energy, restoring both; no config saves"]
+    fn live_native_scene_roundtrip() {
+        require_native().unwrap();
+        let _control = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
+        let _energy = crate::system::vendor_bus::ENERGY_LOCK.lock();
+        let before_mode = crate::hal::xingyao::read_mode().unwrap();
+        let before_energy = read_energy().unwrap();
+        struct Restore(u8, power::GUID);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = crate::hal::xingyao::set_mode(self.0);
+                power::set_active_overlay_scheme(&self.1);
+            }
+        }
+        let _restore = Restore(before_mode, before_energy);
+        let plan = |mode, energy| Plan { firmware_mode: mode, energy,
+            brightness: None, keyboard_timeout: None, refresh_hz: None };
+        let result = usage_txn::execute(&mut SystemBackend, &plan(2, energy_bytes("balanced").unwrap())).unwrap();
+        assert!(result.succeeded(), "{result:?}");
+        assert_eq!(crate::hal::xingyao::read_mode().unwrap(), 2);
+        assert_eq!(read_energy().unwrap(), power::GUID_BALANCED);
+        let result = usage_txn::execute(&mut SystemBackend, &plan(before_mode, guid_bytes(before_energy))).unwrap();
+        assert!(result.succeeded(), "{result:?}");
+        assert_eq!(crate::hal::xingyao::read_mode().unwrap(), before_mode);
+        assert_eq!(read_energy().unwrap(), before_energy);
+        println!("NATIVE_SCENE_ROUNDTRIP mode {before_mode} -> 2 -> {before_mode}; energy restored; config untouched");
+    }
 }
