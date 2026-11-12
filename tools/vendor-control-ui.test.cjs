@@ -76,7 +76,10 @@ window.mount();
         if (name === 'get_display_policy') return {policy:'follow_system',paths:[{target_id:256,drr_enabled:true,virtual_hz:60}]};
         if (name === 'set_windows_energy') { if(f.usageFail) throw new Error('energy rejected'); f.usage.current_energy=args.mode; return; }
         if (name === 'save_usage_settings') { f.usage=JSON.parse(JSON.stringify(args.settings)); return; }
-        if (name === 'apply_usage_profile') return f.usageFail ? {applied:[],failed:['firmware: readback rejected'],rollback_failed:[]} : {applied:['firmware','windows_energy'],failed:[],rollback_failed:[]};
+        if (name === 'apply_usage_profile') return f.usageFail
+          ? {applied:[],failed:['firmware: readback rejected'],rollback_failed:[],restored:[],relinquished:[],
+             unverified:['firmware: readback failed; value not verified or restored'],reverted:false}
+          : {applied:['firmware','windows_energy'],failed:[],rollback_failed:[],restored:[],relinquished:[],unverified:[],reverted:false};
         if (name === 'get_battery_health') return [{instance:'battery0',designed_capacity:null,full_capacity:80690,cycles:null,charge_rate:6000,discharge_rate:0,charging:true,discharging:false,capacity_relative:0,remaining_capacity:78000}];
         if (name === 'get_system_stats') { if(f.failStats) throw new Error('sensor unavailable'); return null; }
         if (name === 'get_power_settings') return f.power;
@@ -163,6 +166,10 @@ window.mount();
     await page.evaluate(()=>{window.fixture.usageFail=true;});
     await page.getByRole('button',{name:'Office fixture',exact:true}).click();
     await page.getByRole('status').filter({hasText:'应用失败'}).waitFor();
+    const failedText = await page.getByRole('status').filter({hasText:'应用失败'}).innerText();
+    assert.ok(failedText.includes('无法确认当前值'), `unknown readback must be surfaced: ${failedText}`);
+    assert.ok(!failedText.includes('已恢复原设置') && !failedText.includes('已回读确认恢复原值'),
+      `failed apply must not claim recovery: ${failedText}`);
     console.log('PASS usage profiles: independent energy selection and truthful failed apply');
     await page.getByRole('button',{name:'编辑场景',exact:true}).click();
     await page.getByRole('textbox',{name:'office 名称',exact:true}).fill('Edited fixture');

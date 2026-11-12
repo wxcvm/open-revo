@@ -5,8 +5,21 @@ interface Profile { id: string; name: string; native_mode: number; energy_mode: 
 interface Settings { supported: boolean; profiles: Profile[]; auto_ac: string | null; auto_battery: string | null; current_energy: string | null; current_native_mode: number | null }
 interface BatteryData { instance: string; designed_capacity: number | null; full_capacity: number | null; remaining_capacity: number | null; charge_rate: number | null; discharge_rate: number | null; cycles: number | null; charging: boolean | null; discharging: boolean | null; capacity_relative: number | null }
 interface Policy { policy: string; paths: { target_id: number; drr_enabled: boolean; virtual_hz: number | null }[] }
+interface ApplyResult { applied: string[]; failed: string[]; rollback_failed: string[]; restored?: string[]; relinquished?: string[]; unverified?: string[]; reverted?: boolean }
 const energyNames: Record<string, string> = { efficiency: '最佳能效', balanced: '平衡', performance: '最佳性能' };
 const positive = (value: number | null | undefined): value is number => typeof value === 'number' && value > 0 && value < 0xffffffff;
+// Only report what the backend verified by readback; never call an unknown
+// readback "restored" and never hide an externally changed value.
+const describeApply = (name: string, result: ApplyResult): string => {
+  if (!result.failed.length) return `已应用 ${name}：${result.applied.join('、')}`;
+  const parts = [`应用失败：${result.failed.join('；')}`];
+  if (result.rollback_failed.length) parts.push(`回退失败：${result.rollback_failed.join('；')}`);
+  if (result.unverified?.length) parts.push(`读取失败，无法确认当前值（未声称已恢复）：${result.unverified.join('；')}`);
+  if (result.relinquished?.length) parts.push(`检测到非本次修改的值，已保留未覆盖：${result.relinquished.join('；')}`);
+  if (result.restored?.length) parts.push(`已回读确认恢复原值：${result.restored.join('、')}`);
+  if (result.reverted) parts.push('所有已触碰设置均已回读确认为原值');
+  return parts.join('。');
+};
 
 export const UsageProfilesPanel: React.FC = () => {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -62,8 +75,8 @@ export const UsageProfilesPanel: React.FC = () => {
       <p className="sys-row-desc">以下是使用场景，不是充电上限模式。未勾选的屏幕与背光项目保持当前设置。</p>
       <div className="usage-actions">
         {settings.profiles.map(p => <button key={p.id} className="toggle-btn" disabled={busy || dirty} onClick={() => void run(async () => {
-          const result = await invoke<{ applied: string[]; failed: string[]; rollback_failed: string[] }>('apply_usage_profile', { id: p.id });
-          setMessage(result.failed.length ? `应用失败：${result.failed.join('；')}。${result.rollback_failed.length ? `回退未完成：${result.rollback_failed.join('；')}` : '已尝试恢复原设置'}` : `已应用 ${p.name}：${result.applied.join('、')}`);
+          const result = await invoke<ApplyResult>('apply_usage_profile', { id: p.id });
+          setMessage(describeApply(p.name, result));
           setSettings(await invoke<Settings>('get_usage_settings'));
           setPolicy(await invoke<Policy>('get_display_policy'));
         })}>{p.name}</button>)}

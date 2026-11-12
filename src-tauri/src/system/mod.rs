@@ -38,3 +38,5 @@ pub mod display_policy;
 pub mod battery;
 
 pub mod windows_energy;
+
+pub mod usage_txn;

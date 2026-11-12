@@ -705,6 +705,9 @@ pub fn set_power_option(
     enable: bool,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<PowerSettingsInfo, String> {
+    let _energy = if option == "high_perf" {
+        Some(crate::system::vendor_bus::ENERGY_LOCK.lock())
+    } else { None };
     let mut cfg = crate::system::config::load_config();
     match option.as_str() {
         "usb_charge" | "ac_recovery" => {

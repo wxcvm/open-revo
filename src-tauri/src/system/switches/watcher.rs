@@ -387,7 +387,7 @@ pub fn start_hardware_state_watcher(
                 let cfg = crate::system::config::load_config();
                 let selected = if is_ac { cfg.usage_auto_ac } else { cfg.usage_auto_battery };
                 if let Some(id) = selected {
-                    match crate::commands::usage_cmd::apply_usage_profile(id, app.clone()) {
+                    match crate::commands::usage_cmd::apply_automatic_profile(id, app.clone()) {
                         Ok(result) => { use tauri::Emitter; let _ = app.emit("usage-profile-applied", result); }
                         Err(error) => { crate::log_warn!("USAGE_PROFILE", "{}", error); }
                     }

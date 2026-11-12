@@ -15,6 +15,10 @@ const SESSION_IDLE: Duration = Duration::from_secs(25);
 const START_BUDGET: Duration = Duration::from_secs(15);
 
 pub static CONTROL_MODE_LOCK: Mutex<()> = Mutex::new(());
+/// Serializes Windows energy-scheme ownership between legacy firmware linkage
+/// and explicit manual/scene selection. Lock order is CONTROL then ENERGY;
+/// raw get/set helpers must not take this lock themselves.
+pub static ENERGY_LOCK: Mutex<()> = Mutex::new(());
 static CLIENT: Mutex<Option<BusClient>> = Mutex::new(None);
 static FAN_OBSERVED: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 

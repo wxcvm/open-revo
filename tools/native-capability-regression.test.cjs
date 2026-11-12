@@ -73,3 +73,25 @@ test('battery health only issues query IOCTLs and preserves unknown capacity and
   assert.match(battery, /i32::MIN/);
   assert.match(battery, /value == u32::MAX/);
 });
+
+
+test('manual, scene and legacy energy ownership share the same serialization', () => {
+  const power=read('src-tauri/src/system/power/mod.rs');
+  const legacy=power.slice(power.indexOf('pub fn apply_windows_power_overlay'),power.indexOf('pub fn set_windows_power_overlay'));
+  assert.ok(legacy.indexOf('ENERGY_LOCK.lock') < legacy.indexOf('load_config'));
+  const usage=read('src-tauri/src/commands/usage_cmd.rs');
+  for(const name of ['set_windows_energy', 'apply_profile']) {
+    const body=usage.slice(usage.indexOf('fn '+name),usage.indexOf('fn '+name)+1800);
+    assert.ok(body.indexOf('CONTROL_MODE_LOCK.lock') < body.indexOf('ENERGY_LOCK.lock'));
+  }
+  assert.match(read('src-tauri/src/system/switches/watcher.rs'), /apply_automatic_profile/);
+  assert.match(usage, /if save_manual_preferences/);
+});
+
+test('scene display control never falls back to an external primary display', () => {
+  const policy=read('src-tauri/src/system/display_policy.rs');
+  const body=policy.slice(policy.indexOf('pub fn set_internal_fixed'),policy.indexOf('pub fn set_primary_fixed'));
+  assert.match(body, /is_internal/);
+  assert.doesNotMatch(body, /or_else|is_primary/);
+  assert.match(read('src-tauri/src/commands/usage_cmd.rs'), /set_internal_fixed/);
+});

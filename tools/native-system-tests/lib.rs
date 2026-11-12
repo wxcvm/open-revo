@@ -7,3 +7,5 @@ mod display;
 mod display_policy;
 #[path = "../../src-tauri/src/system/windows_energy.rs"]
 mod windows_energy;
+#[path = "../../src-tauri/src/system/usage_txn.rs"]
+pub mod usage_txn;

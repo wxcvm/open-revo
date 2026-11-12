@@ -20,7 +20,7 @@
 - The previously captured local WMAA fan dispatcher exposes GFNS reads, not a verified duty/full-speed setter. The charging threshold interface is still unproven on this board. No speculative EC writes, fabricated charging presets or manual fan curve controls were added. This is an inspection of retained local evidence, not a new exhaustive firmware/provider investigation.
 - No automatic OEM backend installation or service revival. Optional compatibility remains unavailable until it adds a demonstrated capability and supports exclusive ownership.
 - A force kill/crash cannot execute normal-exit restoration. Temporary rate changes do not update the Windows display database; after an abnormal exit the user may need to restore the rate in Windows. Crash-recovery journaling is not implemented.
-- The main app's full lib test executable still fails during loader startup with `0xc0000139`; do not count its tests as passed. The isolated Windows system test crate imports the production battery, display and Windows energy modules to avoid unrelated runtime imports.
+- At initial delivery the main lib test executable failed during loader startup with `0xc0000139`. The follow-up fixes its missing Common-Controls v6 manifest; targeted lib tests now run. See `HARNESS-RELIABILITY-20261112.md`. The isolated Windows system test crate continues to import production modules for deterministic and explicit hardware acceptance.
 
 ## Reproduction
 
