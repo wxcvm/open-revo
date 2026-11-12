@@ -184,6 +184,13 @@ pub fn run() {
             commands::hardware_cmd::set_battery_limit,
             commands::hardware_cmd::switch_refresh_rate,
             commands::hardware_cmd::get_display_monitors,
+            commands::charge_cmd::get_native_charge_state,
+            commands::charge_cmd::apply_native_charge_policy,
+            commands::gpu_cmd::get_gpu_driver_graphics_state,
+            commands::gpu_cmd::set_gpu_driver_toggle,
+            commands::gpu_cmd::set_gpu_driver_chill_fps,
+            commands::gpu_cmd::set_gpu_driver_frtc_fps,
+            commands::gpu_cmd::restore_gpu_driver_session,
             commands::hardware_cmd::get_display_policy,
             commands::usage_cmd::get_usage_settings,
             commands::usage_cmd::save_usage_settings,
@@ -261,6 +268,9 @@ pub fn run() {
             commands::hardware_cmd::get_cpu_freq_info,
             commands::hardware_cmd::set_cpu_freq_limit,
             commands::hardware_cmd::reset_cpu_freq_limit,
+            commands::cpu_policy_cmd::get_cpu_policy,
+            commands::cpu_policy_cmd::apply_cpu_policy,
+            commands::cpu_policy_cmd::reset_cpu_policy_session,
             commands::hardware_cmd::set_cpu_safety_guard,
             commands::hardware_cmd::get_power_settings,
             commands::hardware_cmd::set_battery_mode,
@@ -479,6 +489,7 @@ pub fn run() {
         .expect("error while building OpenRevo application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                crate::hal::adlx::service::shutdown();
                 let _ = crate::system::display_policy::follow_system();
                 println!("[OpenRevo] Process exiting. Executing clean webview shutdown and hardware safety shutdown...");
                 crate::system::webview_orchestrator::WebviewOrchestrator::global().safe_shutdown_all_subviews();

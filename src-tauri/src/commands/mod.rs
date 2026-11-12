@@ -3,7 +3,10 @@
 
 pub mod brfx_presets;
 pub mod cooler_cmd;
+pub mod cpu_policy_cmd;
 pub mod display_cmd;
+pub mod gpu_cmd;
+pub mod charge_cmd;
 pub mod hardware_cmd;
 pub mod lighting_cmd;
 pub mod power_cmd;
@@ -20,6 +23,7 @@ pub mod vendor_cmd;
 
 pub use cooler_cmd::*;
 pub use display_cmd::*;
+pub use gpu_cmd::*;
 pub use lighting_cmd::*;
 pub use power_cmd::*;
 pub use switches_cmd::*;

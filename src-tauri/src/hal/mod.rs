@@ -1,6 +1,8 @@
 // OpenRevo Hardware Abstraction Layer (HAL) Module
 
 // pub mod baolongda_guard;
+pub mod adlx;
+pub mod p916f_charge;
 pub mod declarative;
 pub mod driver_impl;
 pub mod mock;

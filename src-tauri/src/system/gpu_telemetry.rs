@@ -1,5 +1,6 @@
 // Read-only WDDM telemetry. ABI definitions follow the Windows SDK d3dkmthk.h.
-// No OEM service, AMD runtime, kernel driver installation or register writes.
+// WDDM has no OEM dependency; supported Radeon metrics additionally use cached read-only ADLX.
+// No kernel driver installation or register writes.
 use std::ffi::c_void;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -226,7 +227,18 @@ pub fn sample(find_node: fn(&str) -> Option<u32>) -> GpuSample {
             return snapshot.clone();
         }
     }
-    let snapshot = read_sample(find_node);
+    let mut snapshot = read_sample(find_node);
+    if let Some(amd) = crate::hal::adlx::service::cached_metrics(&snapshot.name) {
+        if let Some(t) = amd.temperature_c {
+            snapshot.temperature = t.round() as u32;
+        }
+        if let Some(c) = amd.core_mhz {
+            snapshot.core_mhz = c as u32;
+        }
+        if let Some(m) = amd.memory_mhz {
+            snapshot.memory_mhz = m as u32;
+        }
+    }
     *cache = Some((Instant::now(), snapshot.clone()));
     snapshot
 }

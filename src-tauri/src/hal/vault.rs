@@ -8,6 +8,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/generated_vault.rs"));
 pub mod xingyao;
+pub mod p916f_pmc2;
 
 #[cfg(test)]
 mod tests {

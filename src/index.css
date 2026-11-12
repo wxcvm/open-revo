@@ -1435,6 +1435,234 @@ button {
   border-color: var(--border-medium);
 }
 
+/* Windows CPU policy (AC/DC) - explicit OS policy, never a TDP or silicon-clock claim */
+.cpu-policy-card {
+  padding: 0;
+}
+
+.cpu-policy-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cpu-policy-loading {
+  padding: 10px 13px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.cpu-policy-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cpu-policy-card[open] .cpu-policy-summary {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cpu-policy-summary-values {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cpu-policy-summary-separator {
+  margin: 0 7px;
+  color: var(--border-highlight);
+}
+
+.cpu-policy-expand {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.cpu-policy-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px 13px;
+}
+
+.cpu-policy-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cpu-policy-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.cpu-policy-desc {
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.cpu-policy-plan {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.cpu-policy-plan code {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.cpu-policy-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.cpu-policy-side {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.cpu-policy-side-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.cpu-policy-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cpu-policy-field-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.cpu-policy-policy-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface-badge);
+}
+
+.cpu-policy-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cpu-policy-range {
+  flex: 1;
+  min-width: 0;
+  height: 5px;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+
+.cpu-policy-value {
+  min-width: 38px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.cpu-policy-select,
+.cpu-policy-number {
+  width: 100%;
+}
+
+.cpu-policy-field-desc {
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.cpu-policy-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cpu-policy-error,
+.cpu-policy-result {
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.cpu-policy-error {
+  border: 1px solid var(--status-error);
+  background: var(--status-error-dim);
+  color: var(--status-error);
+}
+
+.cpu-policy-result {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-badge);
+  color: var(--text-muted);
+}
+
+[data-theme="mono"] .cpu-policy-side {
+  background: var(--surface-sunken);
+  border-color: var(--border-medium);
+}
+
+[data-theme="mono"] .cpu-policy-card[open] .cpu-policy-summary {
+  border-bottom-color: var(--border-medium);
+}
+
+[data-theme="mono"] .cpu-policy-policy-tag {
+  border-color: var(--border-medium);
+  color: var(--text-muted);
+}
+
+[data-theme="mono"] .cpu-policy-range {
+  accent-color: var(--text-primary);
+}
+
+[data-theme="mono"] .cpu-policy-error {
+  border-color: var(--border-highlight);
+  background: var(--surface-badge);
+  color: var(--text-primary);
+}
+
 .power-header-zap-badge {
   display: flex;
   align-items: center;
@@ -3536,3 +3764,71 @@ body,
 .usage-battery dd { margin: 0; color: var(--text-primary); }
 .usage-notice { color: var(--text-primary); overflow-wrap: anywhere; }
 [data-theme="mono"] .usage-panel { color: var(--text-primary); }
+
+/* === AMD driver graphics panel === */
+/* AMD 驱动图形特性面板：仅使用设计系统令牌，布局复用 .quick-row / .sys-rows */
+.amdgpu-root { display: flex; flex-direction: column; gap: 10px; }
+
+.amdgpu-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.amdgpu-title { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text-primary); }
+.amdgpu-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; text-align: right; }
+.amdgpu-meta-line { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+
+.amdgpu-status { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--border-subtle); background: var(--surface-pill); color: var(--text-secondary); font-size: 10px; font-weight: 600; }
+.amdgpu-dot { flex-shrink: 0; width: 5px; height: 5px; border-radius: var(--radius-full); background: var(--text-dim); }
+.amdgpu-status.is-ok { color: var(--accent-gpu); border-color: var(--accent-gpu-border); background: var(--accent-gpu-dim); }
+.amdgpu-status.is-ok .amdgpu-dot { background: var(--accent-gpu); box-shadow: 0 0 6px var(--accent-gpu-glow); }
+.amdgpu-status.is-offline { color: var(--text-secondary); border-color: var(--border-medium); background: var(--surface-pill); }
+
+.amdgpu-row { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.amdgpu-row.is-disabled { opacity: 0.62; }
+.amdgpu-row.is-disabled:hover { background: transparent; }
+.amdgpu-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.amdgpu-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.amdgpu-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: var(--radius-full); border: 1px solid var(--border-subtle); background: var(--surface-badge); color: var(--text-muted); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.4px; line-height: 1.6; white-space: nowrap; }
+.amdgpu-chip--ok { color: var(--accent-gpu); border-color: var(--accent-gpu-border); background: var(--accent-gpu-dim); }
+.amdgpu-chip--muted { color: var(--text-dim); border-color: var(--border-subtle); background: var(--surface-pill); }
+.amdgpu-chip--unknown { color: var(--status-warn); border-color: var(--status-warn); background: var(--status-warn-dim); }
+
+.amdgpu-fps-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.amdgpu-fps-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.amdgpu-fps-unit { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.amdgpu-fps { width: 68px; padding: 3px 6px; font-family: var(--font-mono); font-size: 11px; text-align: right; color: var(--text-primary); background: var(--surface-sunken); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); outline: none; transition: border-color var(--transition-fast); }
+.amdgpu-fps:hover:not(:disabled) { border-color: var(--border-highlight); }
+.amdgpu-fps:focus-visible { border-color: var(--accent-gpu-border); box-shadow: 0 0 0 1px var(--accent-gpu-glow); }
+.amdgpu-fps:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.amdgpu-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.4px; color: var(--text-secondary); }
+.amdgpu-evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+.amdgpu-evidence-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); background: var(--surface-pill); }
+.amdgpu-evidence-name { font-size: 10.5px; color: var(--text-secondary); }
+
+.amdgpu-note { margin: 0; font-size: 10px; line-height: 1.6; color: var(--text-dim); }
+.amdgpu-skip-list { margin: 0; padding-left: 16px; font-size: 10px; line-height: 1.6; color: var(--text-dim); overflow-wrap: anywhere; }
+.amdgpu-session-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.amdgpu-message { margin: 0; padding: 6px 9px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); background: var(--surface-pill); color: var(--text-secondary); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.amdgpu-message.is-error { color: var(--status-error); border-color: var(--status-error); background: var(--status-error-dim); }
+
+.amdgpu-error { margin: 0; font-size: 10.5px; line-height: 1.5; color: var(--status-error); overflow-wrap: anywhere; }
+.amdgpu-error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--status-error); background: var(--status-error-dim); }
+
+.amdgpu-warnings { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--status-warn); background: var(--status-warn-dim); }
+.amdgpu-warnings-title { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: var(--status-warn); }
+.amdgpu-warnings-list { margin: 0; padding-left: 16px; font-size: 10px; line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+.amdgpu-placeholder { padding: 10px 12px; border-radius: var(--radius-md); border: 1px dashed var(--border-subtle); background: var(--surface-sunken); color: var(--text-dim); font-size: 10.5px; }
+
+/* 单色工业风适配：强调色一律收敛为单色令牌 */
+[data-theme="mono"] .amdgpu-status.is-ok { color: var(--text-primary); border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-status.is-ok .amdgpu-dot { background: var(--text-primary); box-shadow: none; }
+[data-theme="mono"] .amdgpu-chip--ok { color: var(--text-primary); border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-chip--unknown { color: var(--text-primary); border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-fps:focus-visible { border-color: var(--border-highlight); box-shadow: none; }
+[data-theme="mono"] .amdgpu-error,
+[data-theme="mono"] .amdgpu-message.is-error { color: var(--text-primary); }
+[data-theme="mono"] .amdgpu-message.is-error { border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-error-row { border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-warnings { border-color: var(--border-medium); background: var(--surface-pill); }
+[data-theme="mono"] .amdgpu-warnings-title { color: var(--text-primary); }

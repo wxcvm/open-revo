@@ -20,6 +20,7 @@ import { DisplayColorTuning } from './display/DisplayColorTuning';
 import { DisplayColorCalibration } from './display/DisplayColorCalibration';
 import { MiniLedControl } from './display/MiniLedControl';
 import { GpuModeCards, GpuModeInfo, PendingSwitch, NoticeState } from './gpu/GpuModeCards';
+import AmdDriverGraphicsPanel from './gpu/AmdDriverGraphicsPanel';
 import { getModeTitle, getModeHexDisplay } from './gpu/gpuUtils';
 import { DisplayTuningState, DisplayMonitor } from '../types/hardware';
 
@@ -422,6 +423,8 @@ export const GpuModeView: React.FC = () => {
         onDismissNotice={() => setNotice(null)}
         onUnlockGeekIgpu={handleUnlockGeekIgpu}
       />
+
+      <AmdDriverGraphicsPanel />
 
       {/* Slot 2: Screen brightness control */}
       <BrightnessControl

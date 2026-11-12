@@ -7,6 +7,9 @@ pub mod service_mgr;
 pub mod device_switches;
 pub mod switches;
 pub mod cpu_monitor;
+pub mod cpu_policy;
+#[cfg(target_os = "windows")]
+pub mod cpu_policy_win;
 pub mod power_listener;
 pub mod power_mode;
 pub mod power;
