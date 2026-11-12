@@ -1414,14 +1414,19 @@ button {
 .power-view-container {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 9px;
   user-select: none;
   position: relative;
-  height: 100%;
-  max-height: 658px;
-  overflow: hidden;
+  /* The shell viewport owns scrolling; never clip expandable power panels. */
+  height: auto;
+  min-height: 0;
+  overflow: visible;
   color: var(--text-primary);
+}
+
+.power-view-container > * {
+  flex-shrink: 0;
 }
 
 .power-subtle-card {
