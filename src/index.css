@@ -1607,6 +1607,11 @@ button {
   width: 100%;
 }
 
+/* Four-digit MHz values must remain readable beside the native number stepper. */
+.cpu-policy-number {
+  min-width: 96px;
+}
+
 .cpu-policy-field-desc {
   font-size: 9px;
   line-height: 1.35;
