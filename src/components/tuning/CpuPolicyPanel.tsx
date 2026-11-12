@@ -214,7 +214,7 @@ export const CpuPolicyPanel: React.FC = () => {
               Windows 最大处理器频率策略 (MHz) <span className="cpu-policy-policy-tag">OS 策略</span>
             </span>
             <input
-              className="cpu-policy-number"
+              className="tuning-input-number cpu-policy-number"
               type="number"
               min={0}
               max={7000}
@@ -224,7 +224,7 @@ export const CpuPolicyPanel: React.FC = () => {
               onChange={(e) => changeSide(source, 'max_mhz', Number(e.target.value))}
             />
             <span className="cpu-policy-field-desc">
-              0 = 不限制。仅为 Windows 策略值，不保证硅片实际频率，也不代表 TDP/电压。
+              0 = 不限制，或输入 400–7000 MHz。仅为 Windows 策略值，不保证硅片实际频率，也不代表 TDP/电压。
             </span>
           </label>
         )}
