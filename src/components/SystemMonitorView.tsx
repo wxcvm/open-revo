@@ -5,6 +5,7 @@ import { HardwareState, SystemStats } from '../types/hardware';
 import { RevTickBar, MeterTone } from './ui/RevTickBar';
 import { parseFanBoost, useVendorControl } from '../state/vendorControl';
 import { TelemetryTracePanel } from './monitor/TelemetryTracePanel';
+import { ResourceOverview } from './monitor/ResourceOverview';
 
 interface SystemMonitorViewProps {
   status: HardwareState;
@@ -14,6 +15,8 @@ interface SystemMonitorViewProps {
   fanControllable?: boolean;
   nativeControl?: boolean;
   discreteGpu?: boolean;
+  resourceView: boolean;
+  onResourceView: (open: boolean) => void;
 }
 
 const POLL_INTERVAL_MS = 1200;
@@ -30,11 +33,14 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   fanControllable = false,
   nativeControl = false,
   discreteGpu,
+  resourceView,
+  onResourceView,
 }) => {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [statsUnavailable, setStatsUnavailable] = useState(false);
 
   useEffect(() => {
+    if (resourceView) return;
     let alive = true;
     let timer: number | undefined;
     const sample = async () => {
@@ -57,9 +63,9 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
       alive = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [resourceView]);
 
-  const vendor = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost, !nativeControl);
+  const vendor = useVendorControl('vendor_probe_fan', 'Fan/Status', parseFanBoost, !nativeControl && !resourceView);
   const vendorBoost = vendor.snapshot?.value;
   const boost = vendorBoost ?? (status.vendor_bus_selected ? undefined : status.fan_boost);
 
@@ -100,13 +106,16 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           <span>系统监控</span>
         </div>
         <div className="sys-monitor-badges">
-          <span className={statsUnavailable ? 'sys-monitor-badge is-demo' : 'sys-monitor-badge'}>
+          <button className="resource-button" type="button" aria-pressed={resourceView}
+            onClick={() => onResourceView(!resourceView)}>{resourceView ? '返回监控概览' : '资源去向'}</button>
+          {!resourceView && <span className={statsUnavailable ? 'sys-monitor-badge is-demo' : 'sys-monitor-badge'}>
             <span className="live-dot" />
             {status.is_mock ? '硬件演示数据' : storageLabel}
-          </span>
+          </span>}
         </div>
       </div>
 
+      {resourceView ? <ResourceOverview /> : <>
       <div className="sys-monitor-grid">
         <section className="mon-card">
           <span className="oem-bracket-tl" />
@@ -374,6 +383,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
         <span>硬件遥测由宿主推送 · RAM / 卷容量独立采样</span>
         <span>{status.model_name || 'OpenRevo'}</span>
       </div>
+      </>}
     </div>
   );
 };

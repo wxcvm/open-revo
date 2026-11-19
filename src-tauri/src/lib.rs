@@ -166,6 +166,12 @@ pub fn run() {
             commands::hardware_cmd::get_model_capabilities,
             commands::hardware_cmd::get_hardware_status,
             commands::sysinfo_cmd::get_system_stats,
+            commands::sysinfo_cmd::get_resource_snapshot,
+            commands::sysinfo_cmd::release_resource_view,
+            commands::sysinfo_cmd::get_resource_history,
+            commands::sysinfo_cmd::set_resource_history,
+            commands::sysinfo_cmd::clear_resource_history,
+            commands::sysinfo_cmd::export_resource_history_csv,
             commands::sysinfo_cmd::export_telemetry_csv,
             commands::vendor_cmd::vendor_service_state,
             commands::vendor_cmd::vendor_connect_service,
@@ -394,6 +400,10 @@ pub fn run() {
             commands::watcher_cmd::trigger_watcher_manual,
         ])
         .setup(move |app| {
+            match app.path().app_local_data_dir() {
+                Ok(dir) => crate::system::resources::start(dir.join("resource-history-v1")),
+                Err(error) => crate::log_warn!("RESOURCES", "Resource history directory unavailable: {error}"),
+            }
             openrevo_core::set_global_event_sink(Arc::new(TauriEventSink::new(app.handle().clone())));
             crate::system::boot_trace::boot_log("SETUP", "Tauri setup closure entered");
             crate::system::actuator::UnifiedPowerActuator::global().bind_app_handle(app.handle().clone());
@@ -490,6 +500,7 @@ pub fn run() {
         .expect("error while building OpenRevo application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                crate::system::resources::flush_on_exit();
                 crate::hal::adlx::service::shutdown();
                 let _ = crate::system::display_policy::follow_system();
                 println!("[OpenRevo] Process exiting. Executing clean webview shutdown and hardware safety shutdown...");

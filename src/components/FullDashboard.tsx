@@ -82,6 +82,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
   onPreviewFormFactor: propOnPreviewFormFactor,
 }) => {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab || 'overview');
+  const [resourceView, setResourceView] = useState(false);
   const [isCustomTuningOpen, setIsCustomTuningOpen] = useState(initialOpenCustomTuning);
   const [showOemModal, setShowOemModal] = useState(false);
   const [isSwitchingService, setIsSwitchingService] = useState(false);
@@ -672,6 +673,8 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
           <ModuleErrorBoundary moduleName="系统监控" onNavigateToOverview={() => setActiveTab('overview')}>
             <SystemMonitorView
               status={status}
+              resourceView={resourceView}
+              onResourceView={setResourceView}
               maxFanRpm={capabilities?.max_fan_rpm}
               fanControllable={capabilities?.fan_custom_curve === true}
               discreteGpu={capabilities?.discrete_gpu}

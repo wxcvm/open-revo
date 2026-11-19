@@ -1,14 +1,20 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use windows::core::{w, PCWSTR};
+use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Power::{
     RegisterPowerSettingNotification, POWERBROADCAST_SETTING,
 };
+use windows::Win32::System::RemoteDesktop::{
+    WTSFreeMemory, WTSQuerySessionInformationW, WTSRegisterSessionNotification,
+    WTSUnRegisterSessionNotification, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+    WTS_SESSIONSTATE_LOCK, WTSINFOEXW, WTSSessionInfoEx, NOTIFY_FOR_THIS_SESSION,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
     RegisterClassExW, TranslateMessage, MSG, WINDOW_EX_STYLE, WNDCLASSEXW,
-    WS_OVERLAPPED,
+    WS_OVERLAPPED, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
 };
+use super::telemetry::{set_resource_pause, ResourcePause};
 
 const WM_POWERBROADCAST: u32 = 0x0218;
 const WM_QUERYENDSESSION: u32 = 0x0011;
@@ -163,9 +169,18 @@ unsafe extern "system" fn power_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        WM_WTSSESSION_CHANGE => {
+            match wparam.0 as u32 {
+                WTS_SESSION_LOCK => set_resource_pause(ResourcePause::SessionLocked, true),
+                WTS_SESSION_UNLOCK => set_resource_pause(ResourcePause::SessionLocked, false),
+                _ => {}
+            }
+            LRESULT(0)
+        }
         WM_POWERBROADCAST => {
             let pbt = wparam.0 as u32;
             if pbt == PBT_APMSUSPEND {
+                set_resource_pause(ResourcePause::SystemSuspended, true);
                 // If Keep-Awake is active or screen was turned off for overnight tasks,
                 // NEVER degrade power mode to Office (1) and NEVER shut down water cooling!
                 let is_running_tasks = crate::system::switches::is_keep_awake() || crate::system::switches::is_screen_off();
@@ -224,6 +239,7 @@ unsafe extern "system" fn power_wnd_proc(
                     }
                 }
             } else if pbt == PBT_APMRESUMEAUTOMATIC || pbt == PBT_APMRESUMESUSPEND {
+                set_resource_pause(ResourcePause::SystemSuspended, false);
                 handle_system_resume_pipeline("resumed from Sleep / Hibernate");
             }
             LRESULT(1)
@@ -242,6 +258,7 @@ unsafe extern "system" fn power_wnd_proc(
             LRESULT(1)
         }
         WM_DESTROY => {
+            let _ = WTSUnRegisterSessionNotification(hwnd);
             PostQuitMessage(0);
             LRESULT(0)
         }
@@ -294,6 +311,21 @@ pub fn start_power_event_watcher() {
 
         let hwnd = hwnd.unwrap();
         POWER_WATCHER_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+
+        if let Err(error) = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) {
+            crate::log_warn!("RESOURCES", "Could not register for session lock notifications: {error}");
+        }
+        let mut buffer = PWSTR::null();
+        let mut bytes = 0;
+        if WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSSessionInfoEx, &mut buffer, &mut bytes).is_ok() {
+            if !buffer.is_null() && bytes as usize >= std::mem::size_of::<WTSINFOEXW>() {
+                let info = &*buffer.0.cast::<WTSINFOEXW>();
+                if info.Level == 1 {
+                    set_resource_pause(ResourcePause::SessionLocked, info.Data.WTSInfoExLevel1.SessionFlags as u32 == WTS_SESSIONSTATE_LOCK);
+                }
+            }
+            WTSFreeMemory(buffer.0.cast());
+        }
 
         // Register explicitly for Lid Switch state change notifications
         let _ = RegisterPowerSettingNotification(

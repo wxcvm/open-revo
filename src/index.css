@@ -3865,3 +3865,121 @@ body,
 [data-theme="mono"] .amdgpu-error-row { border-color: var(--border-medium); background: var(--surface-pill); }
 [data-theme="mono"] .amdgpu-warnings { border-color: var(--border-medium); background: var(--surface-pill); }
 [data-theme="mono"] .amdgpu-warnings-title { color: var(--text-primary); }
+
+/* System monitor: Windows resource attribution and history */
+.resource-overview {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.resource-overview h4, .resource-overview p { margin: 0; }
+.resource-overview h4 { font-size: 14px; font-weight: 700; }
+.resource-overview p { color: var(--text-muted); line-height: 1.65; }
+.resource-line, .resource-tabs > div, .resource-actions, .resource-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.resource-line { justify-content: space-between; }
+.resource-button, .resource-overview input:not([type="range"]), .resource-overview select {
+  appearance: auto;
+  color: var(--text-primary);
+  background: var(--surface-pill);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  min-height: 30px;
+  padding: 4px 10px;
+  font: inherit;
+}
+.resource-button { cursor: pointer; }
+.resource-button:is(:hover, [aria-pressed="true"], [aria-checked="true"]) {
+  background: var(--surface-card-active);
+  border-color: var(--border-highlight);
+}
+.resource-button:is([aria-pressed="true"], [aria-checked="true"]) {
+  box-shadow: inset 0 -2px var(--status-info);
+}
+.resource-button:disabled { opacity: .55; cursor: default; }
+.resource-overview :focus-visible, .sys-monitor-head .resource-button:focus-visible {
+  outline: 2px solid var(--status-info);
+  outline-offset: 2px;
+}
+.resource-overview select option { background: var(--surface-base); color: var(--text-primary); }
+.resource-panel, .resource-chart {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-medium);
+  background: var(--surface-card);
+}
+.resource-source, .resource-axis, .resource-chart .resource-line > span {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.resource-plot-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 335px), 1fr));
+}
+.resource-chart-plot { position: relative; }
+.resource-chart svg, .resource-memory-bar {
+  width: 100%;
+  display: block;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+.resource-chart svg { height: 116px; }
+.resource-memory-bar { height: 18px; }
+.resource-memory-bar rect { fill: var(--resource-color); }
+.resource-grid-line, .resource-cursor, .resource-trace { vector-effect: non-scaling-stroke; }
+.resource-grid-line { stroke: var(--border-medium); }
+.resource-cursor { stroke: var(--border-highlight); stroke-dasharray: 3 3; }
+.resource-trace { fill: none; stroke: var(--resource-color); stroke-width: 1.7; stroke-linecap: round; }
+.resource-empty-chart { position: absolute; pointer-events: none; inset: 0; display: grid; place-items: center; color: var(--text-muted); }
+.resource-axis { display: flex; justify-content: space-between; font-size: 11px; }
+.resource-scrub { width: 100%; min-height: 17px; accent-color: var(--status-info); }
+.resource-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; color: var(--text-muted); }
+.resource-legend strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.resource-dot { display: inline-block; width: 8px; height: 8px; border-radius: 100%; margin-right: 5px; background: var(--resource-color); }
+.resource-tone-0 { --resource-color: var(--status-info); }
+.resource-tone-1 { --resource-color: var(--status-warn); }
+.resource-tone-2 { --resource-color: var(--status-ok); }
+.resource-tone-3 { --resource-color: var(--text-secondary); }
+.resource-tone-4 { --resource-color: var(--color-brand); }
+.resource-tone-5 { --resource-color: var(--text-dim); }
+.resource-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr));
+  gap: 7px;
+  margin: 0;
+}
+.resource-fields > div { padding: 7px 9px; background: var(--surface-pill); border-radius: var(--radius-sm); }
+.resource-fields dt { color: var(--text-muted); font-size: 12px; }
+.resource-fields dd { margin: 3px 0 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.resource-panel details summary { cursor: pointer; color: var(--text-secondary); }
+.resource-panel details > .resource-fields, .resource-panel details > p { margin-top: 8px; }
+.resource-search { max-width: 100%; }
+.resource-table-wrap { overflow-x: auto; min-width: 0; }
+.resource-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.resource-table :is(th,td) { padding: 6px; border-bottom: 1px solid var(--border-subtle); text-align: right; white-space: nowrap; }
+.resource-table th { color: var(--text-secondary); font-weight: 650; }
+.resource-table :is(th,td):first-child { text-align: left; max-width: min(31vw, 390px); }
+.resource-table button { color: inherit; font: inherit; text-align: inherit; cursor: pointer; border: 0; background: transparent; }
+.resource-table td button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.resource-table button:hover { text-decoration: underline; }
+.resource-table tr.is-picked { background: var(--surface-card-active); }
+.resource-confirm { padding: 8px; border: 1px solid var(--border-highlight); border-radius: var(--radius-md); }
+.resource-overview [role="alert"] { color: var(--status-warn); }
+
+/* Preserve series contrast when the overall monitor theme is monochrome. */
+[data-theme="mono"] .resource-tone-0 { --resource-color: var(--text-primary); }
+[data-theme="mono"] .resource-tone-1 { --resource-color: var(--text-muted); }
+[data-theme="mono"] .resource-tone-2 { --resource-color: var(--status-ok); }
+[data-theme="mono"] .resource-tone-4 { --resource-color: var(--color-brand); }
+[data-theme="mono"] path.resource-tone-1 { stroke-dasharray: 4 3; }

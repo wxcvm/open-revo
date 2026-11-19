@@ -25,6 +25,7 @@ pub mod tray;
 pub mod window;
 pub mod telemetry;
 pub mod sysinfo;
+pub mod resources;
 pub mod gpu_engine;
 pub mod gpu_telemetry;
 pub mod vendor_bus;

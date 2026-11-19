@@ -12,6 +12,26 @@ use crate::commands::system_cmd::collect_hardware_state;
 static ACTIVE_SUBSCRIBERS: AtomicU32 = AtomicU32::new(0);
 static MAIN_WINDOW_VISIBLE: AtomicBool = AtomicBool::new(true);
 static SCREEN_SUSPENDED: AtomicBool = AtomicBool::new(false);
+static SUSPEND_EPOCH: AtomicU32 = AtomicU32::new(0);
+static RESOURCE_PAUSE: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) enum ResourcePause { SessionLocked = 1, SystemSuspended = 2 }
+pub(crate) fn set_resource_pause(reason: ResourcePause, paused: bool) {
+    let bit = reason as u32;
+    let old = if paused { RESOURCE_PAUSE.fetch_or(bit, Ordering::SeqCst) }
+        else { RESOURCE_PAUSE.fetch_and(!bit, Ordering::SeqCst) };
+    if (old & bit != 0) != paused {
+        SUSPEND_EPOCH.fetch_add(1, Ordering::SeqCst);
+        super::resources::wake();
+    }
+}
+
+pub(crate) fn resource_gates() -> (bool, bool, u32) {
+    (MAIN_WINDOW_VISIBLE.load(Ordering::SeqCst),
+     SCREEN_SUSPENDED.load(Ordering::SeqCst) || REBOOT_FREEZE.load(Ordering::SeqCst)
+         || RESOURCE_PAUSE.load(Ordering::SeqCst) != 0,
+     SUSPEND_EPOCH.load(Ordering::SeqCst))
+}
 
 fn get_subscribed_sensors() -> &'static Mutex<HashMap<String, HashSet<String>>> {
     static SENSORS: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
@@ -51,6 +71,7 @@ pub fn unregister_consumer(consumer_id: &str) {
 pub fn set_main_window_visible(visible: bool) {
     let old = MAIN_WINDOW_VISIBLE.swap(visible, Ordering::SeqCst);
     if old != visible {
+        super::resources::wake();
         crate::log_info!(
             "TELEMETRY",
             "Main window visibility changed to: {}. (Heartbeat policy updated)",
@@ -63,7 +84,10 @@ static REBOOT_FREEZE: AtomicBool = AtomicBool::new(false);
 
 /// Report system reboot in progress to completely freeze telemetry polling and GPU hardware access
 pub fn set_reboot_freeze(freeze: bool) {
-    REBOOT_FREEZE.store(freeze, Ordering::SeqCst);
+    if REBOOT_FREEZE.swap(freeze, Ordering::SeqCst) != freeze {
+        SUSPEND_EPOCH.fetch_add(1, Ordering::SeqCst);
+        super::resources::wake();
+    }
     if freeze {
         crate::log_info!("TELEMETRY", "System reboot initiated: telemetry heartbeat completely frozen.");
     }
@@ -73,6 +97,8 @@ pub fn set_reboot_freeze(freeze: bool) {
 pub fn set_screen_suspended(suspended: bool) {
     let old = SCREEN_SUSPENDED.swap(suspended, Ordering::SeqCst);
     if old != suspended {
+        SUSPEND_EPOCH.fetch_add(1, Ordering::SeqCst);
+        super::resources::wake();
         crate::log_info!(
             "TELEMETRY",
             "Screen suspended changed to: {}. (Telemetry loop parked/resumed)",

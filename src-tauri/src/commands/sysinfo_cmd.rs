@@ -2,6 +2,7 @@
 // Exposes RAM / volume capacity telemetry to the 系统监控 dashboard.
 
 use crate::system::sysinfo::{self, SystemStats};
+use crate::system::resources;
 
 #[tauri::command]
 pub async fn get_system_stats() -> Result<SystemStats, String> {
@@ -39,7 +40,7 @@ pub async fn export_telemetry_csv(window: tauri::WebviewWindow, csv: String) -> 
     #[cfg(windows)]
     {
         let owner = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
-        tauri::async_runtime::spawn_blocking(move || save_csv_dialog(owner, &csv))
+        tauri::async_runtime::spawn_blocking(move || save_csv_dialog(owner, &csv, false))
             .await.map_err(|e| e.to_string())?
     }
     #[cfg(not(windows))]
@@ -47,7 +48,7 @@ pub async fn export_telemetry_csv(window: tauri::WebviewWindow, csv: String) -> 
 }
 
 #[cfg(windows)]
-fn save_csv_dialog(owner: usize, csv: &str) -> Result<Option<String>, String> {
+fn save_csv_dialog(owner: usize, csv: &str, resource: bool) -> Result<Option<String>, String> {
     use std::os::windows::ffi::OsStringExt;
     use windows::{
         core::{w, HRESULT},
@@ -67,10 +68,10 @@ fn save_csv_dialog(owner: usize, csv: &str) -> Result<Option<String>, String> {
         let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
         let options = dialog.GetOptions().map_err(|e| e.to_string())?;
         dialog.SetOptions(options | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_OVERWRITEPROMPT).map_err(|e| e.to_string())?;
-        dialog.SetTitle(w!("保存 OpenRevo 性能记录")).map_err(|e| e.to_string())?;
+        dialog.SetTitle(if resource { w!("保存 OpenRevo 资源汇总") } else { w!("保存 OpenRevo 性能记录") }).map_err(|e| e.to_string())?;
         dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: w!("CSV 文件 (*.csv)"), pszSpec: w!("*.csv") }]).map_err(|e| e.to_string())?;
         dialog.SetDefaultExtension(w!("csv")).map_err(|e| e.to_string())?;
-        dialog.SetFileName(w!("openrevo-telemetry.csv")).map_err(|e| e.to_string())?;
+        dialog.SetFileName(if resource { w!("openrevo-resource-summary.csv") } else { w!("openrevo-telemetry.csv") }).map_err(|e| e.to_string())?;
         if let Err(e) = dialog.Show(HWND(owner as _)) {
             return if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) { Ok(None) } else { Err(e.to_string()) };
         }
@@ -86,6 +87,57 @@ fn save_csv_dialog(owner: usize, csv: &str) -> Result<Option<String>, String> {
     crate::system::config::persist_file(&selected, csv.as_bytes())
         .map_err(|e| format!("无法保存 {}：{e}", selected.display()))?;
     Ok(Some(selected.to_string_lossy().into_owned()))
+}
+
+fn authorize_resource(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" { Ok(()) } else { Err("请从主窗口访问资源监控".into()) }
+}
+
+#[tauri::command]
+pub async fn get_resource_snapshot(window: tauri::WebviewWindow, selected: Option<String>) -> Result<resources::Live, String> {
+    authorize_resource(&window)?;
+    if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+        resources::release()?;
+        return Err("主窗口已隐藏，实时明细已暂停".into());
+    }
+    resources::live(selected)
+}
+
+#[tauri::command]
+pub async fn release_resource_view(window: tauri::WebviewWindow) -> Result<(), String> {
+    authorize_resource(&window)?;
+    resources::release()
+}
+
+#[tauri::command]
+pub async fn get_resource_history(window: tauri::WebviewWindow, hours: u16) -> Result<Vec<resources::Minute>, String> {
+    authorize_resource(&window)?;
+    tauri::async_runtime::spawn_blocking(move || resources::read_history(hours)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn set_resource_history(window: tauri::WebviewWindow, enabled: bool) -> Result<resources::HistoryStatus, String> {
+    authorize_resource(&window)?;
+    tauri::async_runtime::spawn_blocking(move || resources::change_history(enabled)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clear_resource_history(window: tauri::WebviewWindow) -> Result<resources::HistoryStatus, String> {
+    authorize_resource(&window)?;
+    tauri::async_runtime::spawn_blocking(resources::clear_history).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn export_resource_history_csv(window: tauri::WebviewWindow, hours: u16) -> Result<Option<String>, String> {
+    authorize_resource(&window)?;
+    #[cfg(windows)]
+    {
+        let owner = window.hwnd().map_err(|e| e.to_string())?.0 as usize;
+        tauri::async_runtime::spawn_blocking(move || save_csv_dialog(owner, &resources::history_csv(hours)?, true))
+            .await.map_err(|e| e.to_string())?
+    }
+    #[cfg(not(windows))]
+    { let _ = hours; Err("当前平台未实现资源汇总保存对话框".into()) }
 }
 
 #[cfg(test)]
