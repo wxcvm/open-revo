@@ -4,6 +4,7 @@ import { Activity, Cpu, Fan, Gauge, HardDrive, Zap } from 'lucide-react';
 import { HardwareState, SystemStats } from '../types/hardware';
 import { RevTickBar, MeterTone } from './ui/RevTickBar';
 import { parseFanBoost, useVendorControl } from '../state/vendorControl';
+import { TelemetryTracePanel } from './monitor/TelemetryTracePanel';
 
 interface SystemMonitorViewProps {
   status: HardwareState;
@@ -12,6 +13,7 @@ interface SystemMonitorViewProps {
   /** 该机型 manifest 是否声明了风扇调速能力（fan_custom_curve / set_fan 动作） */
   fanControllable?: boolean;
   nativeControl?: boolean;
+  discreteGpu?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1200;
@@ -19,6 +21,7 @@ const clampPct = (value: number) => (Number.isFinite(value) ? Math.min(100, Math
 const toGb = (mb: number) => (Number.isFinite(mb) ? Math.max(0, mb) / 1024 : 0);
 const fmtGb = (value: number) => value.toFixed(1);
 const meterTone = (pct: number): MeterTone => (pct >= 96 ? 'hot' : pct >= 88 ? 'warn' : 'ok');
+const temperatureTone = (celsius: number): MeterTone => celsius >= 95 ? 'hot' : celsius >= 85 ? 'warn' : 'ok';
 const fmtWatt = (watts?: number) => (watts !== undefined && watts > 0 ? `${watts.toFixed(1)} W` : '-- W');
 
 export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
@@ -26,28 +29,30 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   maxFanRpm,
   fanControllable = false,
   nativeControl = false,
+  discreteGpu,
 }) => {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [statsUnavailable, setStatsUnavailable] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    let timer: number | undefined;
     const sample = async () => {
       try {
-        const snapshot = await invoke<SystemStats>('get_system_stats');
+        const snapshot = await invoke<SystemStats | null>('get_system_stats');
         if (!alive) return;
         setStats(snapshot);
-        setStatsUnavailable(false);
+        setStatsUnavailable(!snapshot || (!snapshot.mem?.total_mb && !snapshot.disks?.length));
       } catch {
         if (!alive) return;
         setStats(null);
         setStatsUnavailable(true);
+      } finally {
+        // A slow native read must not pile up overlapping IPC calls.
+        if (alive) timer = window.setTimeout(sample, POLL_INTERVAL_MS);
       }
     };
     void sample();
-    const timer = window.setInterval(() => {
-      void sample();
-    }, POLL_INTERVAL_MS);
     return () => {
       alive = false;
       window.clearInterval(timer);
@@ -64,17 +69,18 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
   const cpuTemp = status.cpu_temp ?? 0;
   const freqCeiling = Math.max(3600, cpuBase * 1.8);
   const freqPct = clampPct((cpuFreq / freqCeiling) * 100);
-  const tempPct = clampPct(((cpuTemp - 30) / 70) * 100);
 
   const gpuUsage = clampPct(status.gpu_usage ?? 0);
   const gpuVramUsed = status.gpu_vram_used_mb ?? 0;
   const gpuVramTotal = status.gpu_vram_mb ?? 0;
   const gpuVramPct = gpuVramTotal > 0 ? clampPct((gpuVramUsed / gpuVramTotal) * 100) : 0;
   const gpuTemp = status.gpu_temp ?? 0;
-  // 核显机型（如 Ryzen AI 9 HX 365 + Radeon 880M）没有 NVAPI 显存总量，隐藏显存行
-  const hasDedicatedVram = gpuVramTotal > 0 && (fanControllable || /NVIDIA|RADEON RX/i.test(status.gpu_name ?? ''));
+  const hasDiscreteGpu = discreteGpu ?? /NVIDIA|RADEON RX/i.test(status.gpu_name ?? '');
+  const hasDedicatedVram = hasDiscreteGpu && gpuVramTotal > 0;
+  const hasSharedMemory = !hasDiscreteGpu && gpuVramTotal > 0 && status.gpu_memory_usage_available === true;
+  const storageLabel = statsUnavailable ? '存储采样不可用' : stats ? '存储实时' : '等待存储采样';
 
-  const mem = stats?.mem;
+  const mem = stats?.mem?.total_mb ? stats.mem : null;
   const memPct = clampPct(mem?.usage ?? 0);
   const disks = stats?.disks ?? [];
 
@@ -96,7 +102,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
         <div className="sys-monitor-badges">
           <span className={statsUnavailable ? 'sys-monitor-badge is-demo' : 'sys-monitor-badge'}>
             <span className="live-dot" />
-            {statsUnavailable ? '监控不可用' : 'LIVE · 1.2s'}
+            {status.is_mock ? '硬件演示数据' : storageLabel}
           </span>
         </div>
       </div>
@@ -141,7 +147,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
 
           <div className="mon-plain">
             <span className="mon-plain-label">温度</span>
-            <span className={cpuTemp > 0 ? `mon-plain-value is-${meterTone(tempPct)}` : 'mon-plain-value'}>
+            <span className={cpuTemp > 0 ? `mon-plain-value is-${temperatureTone(cpuTemp)}` : 'mon-plain-value'}>
               {cpuTemp > 0 ? `${cpuTemp} °C` : '-- °C'}
             </span>
           </div>
@@ -158,13 +164,13 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
               <span>显卡</span>
             </div>
             <div className="mon-card-tag">
-              {hasDedicatedVram ? (
+              {hasDiscreteGpu ? (
                 <>
                   <Zap size={11} />
                   {fmtWatt(status.gpu_power_w)}
                 </>
               ) : (
-                '核显 · WDDM'
+                status.gpu_name ? '核显 · WDDM' : '适配器未识别'
               )}
             </div>
           </div>
@@ -177,10 +183,10 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
             <RevTickBar value={gpuUsage} tone={meterTone(gpuUsage)} />
           </div>
 
-          {hasDedicatedVram && (
+          {(hasDedicatedVram || hasSharedMemory) && (
             <div className="mon-row">
               <div className="mon-row-head">
-                <span className="mon-row-label">显存</span>
+                <span className="mon-row-label">{hasSharedMemory ? '共享显存' : '显存'}</span>
                 <span className="mon-row-value">
                   {fmtGb(toGb(gpuVramUsed))} GB/{fmtGb(toGb(gpuVramTotal))} GB
                 </span>
@@ -199,14 +205,14 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           {gpuTemp > 0 && (
             <div className="mon-plain">
               <span className="mon-plain-label">温度</span>
-              <span className={`mon-plain-value is-${meterTone(tempPct)}`}>{gpuTemp} °C</span>
+              <span className={`mon-plain-value is-${temperatureTone(gpuTemp)}`}>{gpuTemp} °C</span>
             </div>
           )}
 
-          {!hasDedicatedVram && (
+          {(!hasDiscreteGpu || status.gpu_name) && (
             <div className="mon-plain">
               <span className="mon-plain-label">适配器</span>
-              <span className="mon-plain-value">{status.gpu_name || '核显 / 共享显存'}</span>
+              <span className="mon-plain-value">{status.gpu_name || '未识别'}</span>
             </div>
           )}
         </section>
@@ -221,7 +227,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
               <HardDrive />
               <span>存储</span>
             </div>
-            <div className="mon-card-tag">{disks.length} 个固定卷</div>
+            <div className="mon-card-tag">{stats ? `${disks.length} 个固定卷` : '固定卷—'}</div>
           </div>
 
           <div className="mon-row">
@@ -237,7 +243,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           {disks.length === 0 && (
             <div className="mon-plain">
               <span className="mon-plain-label">磁盘</span>
-              <span className="mon-plain-value">采集中…</span>
+              <span className="mon-plain-value">{statsUnavailable ? '无可用读数' : stats ? '没有固定卷数据' : '采集中…'}</span>
             </div>
           )}
 
@@ -285,7 +291,7 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
           {hasGpuFanChannel && (
             <div className="mon-row">
               <div className="mon-row-head">
-                <span className="mon-row-label">{hasDedicatedVram ? '显卡' : '辅助风扇'}</span>
+                <span className="mon-row-label">{hasDiscreteGpu ? '显卡' : '辅助风扇'}</span>
                 <span className="mon-row-value">{gpuFan > 0 ? `${gpuFan} RPM` : '-- RPM'}</span>
               </div>
               {fanCeiling > 0 && <RevTickBar value={gpuFanPct} />}
@@ -363,9 +369,10 @@ export const SystemMonitorView: React.FC<SystemMonitorViewProps> = ({
         </section>
       </div>
 
+      <TelemetryTracePanel />
       <div className="sys-monitor-foot">
-        <span>采样间隔 1.2 s · 数据源 CPU/RAM/卷容量</span>
-        <span>{status.model_name || 'OpenRevo'} · {statsUnavailable ? 'UNAVAILABLE' : 'LIVE'}</span>
+        <span>硬件遥测由宿主推送 · RAM / 卷容量独立采样</span>
+        <span>{status.model_name || 'OpenRevo'}</span>
       </div>
     </div>
   );

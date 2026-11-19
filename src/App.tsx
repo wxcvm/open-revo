@@ -389,8 +389,10 @@ export default function App() {
     bootSync();
 
     // Responsive hardware state event bus subscription (zero polling overhead)
+    let telemetryDisposed = false;
     let unlistenTelemetry: (() => void) | undefined;
     listen<HardwareState>('hardware-state-updated', (event) => {
+      if (telemetryDisposed) return;
       const state = event.payload;
       const now = Date.now();
       const lock = overrideLockRef.current;
@@ -409,7 +411,8 @@ export default function App() {
       });
       setIsTauriEnv(true);
     }).then((un) => {
-      unlistenTelemetry = un;
+      if (telemetryDisposed) un();
+      else unlistenTelemetry = un;
     }).catch(() => {});
 
     // Slow fallback watchdog timer (10s) just in case event stream is quiet
@@ -554,6 +557,7 @@ export default function App() {
 
     return () => {
       clearInterval(timer);
+      telemetryDisposed = true;
       if (unlistenTelemetry) unlistenTelemetry();
       if (unlistenReset) unlistenReset();
       if (unlistenSyncMode) unlistenSyncMode();

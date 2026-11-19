@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { HardwareState, PowerMode, POWER_MODES } from '../types/hardware';
 import { OverviewView } from './OverviewView';
@@ -348,6 +348,11 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
 
   // Sub-nav tab horizontal scroll state & edge fade indicators
   const navBarRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // The shell is shared across tabs; do not inherit the previous tab's scroll.
+    if (viewportRef.current) viewportRef.current.scrollTop = 0;
+  }, [activeTab]);
   const [canScrollNavLeft, setCanScrollNavLeft] = useState(false);
   const [canScrollNavRight, setCanScrollNavRight] = useState(false);
 
@@ -644,7 +649,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
       </div>
 
       {/* Main Body Viewport Slot */}
-      <div className="shell-viewport" data-slot="viewport">
+      <div ref={viewportRef} className="shell-viewport" data-slot="viewport">
         {activeTab === 'overview' && (
           <ModuleErrorBoundary moduleName="状态概览">
             <OverviewView
@@ -669,6 +674,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
               status={status}
               maxFanRpm={capabilities?.max_fan_rpm}
               fanControllable={capabilities?.fan_custom_curve === true}
+              discreteGpu={capabilities?.discrete_gpu}
               nativeControl={capabilities?.id === 'mechrevo_xingyao_14_p916f_stx' && !status.vendor_bus_selected}
             />
           </ModuleErrorBoundary>

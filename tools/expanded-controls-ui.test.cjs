@@ -91,7 +91,10 @@ window.unmount = () => root.render(null);
         async invoke(name, args) {
           const f = window.fixture;
           f.calls.push(name);
-          if (name === 'get_native_charge_state') return structuredClone(f.charge);
+          if (name === 'get_native_charge_state') {
+            if (f.chargeReadFail) throw new Error('readback offline');
+            return structuredClone(f.charge);
+          }
           if (name === 'apply_native_charge_policy') {
             f.chargeCalls.push(structuredClone(args));
             if (f.chargeFail) return {applied:false,failed:'echo rejected',rollback:'restored',state:{enabled:0,threshold1:0,threshold2:0}};
@@ -367,8 +370,17 @@ window.unmount = () => root.render(null);
     await page.waitForFunction(() => document.querySelector('[aria-label="电池充电上限"]').innerText.includes('enabled=0'));
     await page.evaluate(() => { window.fixture.chargeFail = true; });
     await page.getByRole('button', {name:'启用 60% / 100%'}).click();
-    await charge.getByRole('status').filter({hasText:'未生效'}).waitFor();
+    await charge.getByRole('status').filter({hasText:'未确认生效'}).waitFor();
     assert.ok((await charge.innerText()).includes('echo rejected'));
+    await page.evaluate(() => { window.fixture.chargeReadFail = true; });
+    await charge.getByRole('button',{name:'刷新',exact:true}).click();
+    await charge.getByRole('alert').filter({hasText:'readback offline'}).waitFor();
+    assert.equal(await charge.getByRole('button',{name:/启用 .*%/}).count(),0);
+    assert.equal(await charge.getByText(/未启用（满充）/).count(),0);
+    await page.evaluate(() => { window.fixture.chargeReadFail = false; });
+    await charge.getByRole('button',{name:'重新读取'}).click();
+    await charge.getByText(/未启用（满充）/).waitFor();
+    console.log('PASS charge: failed refresh hides stale readback and disables writes until retry succeeds');
     console.log('PASS charge: preset selection is draft-only, exact snapshot sent, disable resets, failed apply stays truthful');
     await page.evaluate(() => { window.unmount(); window.fixture.charge.matched=false; });
     await charge.waitFor({state:'detached'});

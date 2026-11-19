@@ -41,7 +41,7 @@ const describeOutcome = (outcome: NativeChargeOutcome) => {
     return `已写入并独立回读确认：${describeSnapshot(outcome.state)}`;
   }
   const details = [outcome.failed, outcome.rollback].filter(Boolean).join('；');
-  return `未生效。${details || '写入结果未确认'}。已重新读取实际状态。`;
+  return `未确认生效。${details || '写入结果未确认'}。`;
 };
 
 export const NativeChargePanel: React.FC = () => {
@@ -55,8 +55,21 @@ export const NativeChargePanel: React.FC = () => {
 
   const refresh = useCallback(async () => {
     const current = ++generation.current;
-    const next = await invoke<NativeChargeState>('get_native_charge_state');
-    if (current !== generation.current) return next;
+    let next: NativeChargeState;
+    try {
+      next = await invoke<NativeChargeState>('get_native_charge_state');
+      if (!next || typeof next.matched !== 'boolean') throw new Error('硬件回读未返回有效状态');
+    } catch (cause) {
+      if (current === generation.current) {
+        setState(previous => previous?.matched ? {
+          matched: true, available: false, reason: null,
+          enabled: null, threshold1: null, threshold2: null,
+        } : previous);
+        setError(`无法重新读取充电状态：${String(cause)}`);
+      }
+      return;
+    }
+    if (current !== generation.current) return;
     setState(next);
     if (
       next.enabled === 1 &&
@@ -66,18 +79,27 @@ export const NativeChargePanel: React.FC = () => {
     ) {
       setThreshold(next.threshold1);
     }
-    return next;
   }, []);
 
   useEffect(() => {
-    refresh().catch((cause) => setError(String(cause)));
+    void refresh();
     return () => { generation.current++; };
   }, [refresh]);
 
-  if (!state || !state.matched) return null;
+  if (state?.matched === false || (!state && !error)) return null;
+
+  const reread = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try { await refresh(); }
+    finally { pending.current = false; setBusy(false); }
+  };
 
   const known =
-    state.available &&
+    state?.available &&
     state.enabled !== null &&
     state.threshold1 !== null &&
     state.threshold2 !== null;
@@ -89,7 +111,7 @@ export const NativeChargePanel: React.FC = () => {
     : '状态未知';
 
   const run = async (enabled: boolean, nextThreshold: number) => {
-    if (!known || pending.current || state.enabled === null || state.threshold1 === null || state.threshold2 === null) {
+    if (!state || !known || pending.current || state.enabled === null || state.threshold1 === null || state.threshold2 === null) {
       return;
     }
 
@@ -113,19 +135,15 @@ export const NativeChargePanel: React.FC = () => {
       });
       setMessage(describeOutcome(outcome));
     } catch (cause) {
-      setError(`${String(cause)}。已重新读取实际状态，不会乐观显示成功。`);
+      setMessage(`写入未确认：${String(cause)}`);
     } finally {
-      try {
-        await refresh();
-      } catch (cause) {
-        setError(String(cause));
-      }
+      await refresh();
       setBusy(false);
       pending.current = false;
     }
   };
 
-  if (!state.available) {
+  if (!state?.available) {
     return (
       <div className="sys-rows" role="group" aria-label="电池充电上限">
         <div className="quick-row">
@@ -135,24 +153,18 @@ export const NativeChargePanel: React.FC = () => {
               电池充电上限
             </div>
             <div className="sys-row-desc">
-              P916F-STX / BIOS 1.15 已匹配，但 PMC2 当前不可用。{state.reason || '未提供原因。'}
+              {state?.matched ? '机型已匹配，但当前充电状态不可用。' : '未能读取充电控制能力。'}{state?.reason}
             </div>
-            <div className="sys-row-desc">
+            {state?.matched && <div className="sys-row-desc">
               仅打开已存在的 signed inpoutx64 设备；不会安装、启动、删除或下载驱动。
-            </div>
+            </div>}
           </div>
           <div className="sys-row-controls">
             <button
               type="button"
               className="toggle-btn"
               disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                setError('');
-                refresh()
-                  .catch((cause) => setError(String(cause)))
-                  .finally(() => setBusy(false));
-              }}
+              onClick={reread}
             >
               <RefreshCw className="w-3 h-3" />
               重新读取
@@ -164,6 +176,7 @@ export const NativeChargePanel: React.FC = () => {
             {error}
           </div>
         )}
+        {message && <div className="quick-row" role="status">{message}</div>}
       </div>
     );
   }
@@ -188,13 +201,7 @@ export const NativeChargePanel: React.FC = () => {
             type="button"
             className="toggle-btn"
             disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError('');
-              refresh()
-                .catch((cause) => setError(String(cause)))
-                .finally(() => setBusy(false));
-            }}
+            onClick={reread}
           >
             <RefreshCw className="w-3 h-3" />
             刷新

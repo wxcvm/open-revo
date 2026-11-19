@@ -51,8 +51,9 @@ window.mountMini = () => root.render(React.createElement(MiniDrawer, {
 }));
 window.mountPower = () => root.render(React.createElement(PowerTuningView, {sleepModeName:'均衡'}));
 window.mountMonitor = () => root.render(React.createElement(SystemMonitorView, {
-  nativeControl:true, status:{cpu_fan_rpm:3000,gpu_fan_rpm:2800,vendor_bus_selected:false,
-    support_flags:{has_fan_boost:false},gpu_name:'AMD Radeon 880M'}
+  nativeControl:true, discreteGpu:false, status:{cpu_fan_rpm:3000,gpu_fan_rpm:2800,vendor_bus_selected:false,
+    support_flags:{has_fan_boost:false},gpu_name:'AMD Radeon 880M',cpu_temp:52,gpu_temp:96,
+    gpu_vram_mb:16000,gpu_vram_used_mb:2000,gpu_memory_usage_available:true}
 }));
 window.coolerVisible = supported => BUILTIN_MODULE_SLOTS.find(s=>s.id==='water').isVisible({
   status:{},isWaterCoolerEnabled:true,isCoolerConnected:false,capabilities:{water_cooling:supported}
@@ -69,11 +70,22 @@ window.mount();
         deferConnect: false, deferProbe: false, probeReleases: [], selected:true, timer:600,
         failStats:false,failPowerWrite:false,power:{supports_battery_limit:false,supports_ec_power_options:false,
           battery_percent:65,is_ac_online:true,high_perf_scheme:false,sleep_auto_office:false,sleep_guard_enabled:false} };
-      window.__TAURI_INTERNALS__ = { transformCallback() {return 1;}, async invoke(name, args) {
+      const callbacks = new Map(), listeners = new Map();
+      let callbackId = 0;
+      f.emitTelemetry = (payload) => {
+        const id = listeners.get('hardware-state-updated');
+        callbacks.get(id)?.({payload});
+      };
+      window.__TAURI_INTERNALS__ = { transformCallback(callback) {
+        callbacks.set(++callbackId,callback);return callbackId;
+      }, async invoke(name, args) {
         f.calls.push(name);
+        if (name === 'plugin:event|listen') {listeners.set(args.event,args.handler);return args.handler;}
+        if (name === 'plugin:event|unlisten') {listeners.delete(args.event);return;}
         const state = () => ({ present: true, selected: f.selected, running: f.running, auto_start: true });
         if (name === 'get_usage_settings') return f.usage || null;
         if (name === 'get_display_policy') return {policy:'follow_system',paths:[{target_id:256,drr_enabled:true,virtual_hz:60}]};
+        if (name === 'get_native_charge_state') return {matched:false,available:false};
         if (name === 'set_windows_energy') { if(f.usageFail) throw new Error('energy rejected'); f.usage.current_energy=args.mode; return; }
         if (name === 'save_usage_settings') { f.usage=JSON.parse(JSON.stringify(args.settings)); return; }
         if (name === 'apply_usage_profile') return f.usageFail
@@ -81,7 +93,11 @@ window.mount();
              unverified:['firmware: readback failed; value not verified or restored'],reverted:false}
           : {applied:['firmware','windows_energy'],failed:[],rollback_failed:[],restored:[],relinquished:[],unverified:[],reverted:false};
         if (name === 'get_battery_health') return [{instance:'battery0',designed_capacity:null,full_capacity:80690,cycles:null,charge_rate:6000,discharge_rate:0,charging:true,discharging:false,capacity_relative:0,remaining_capacity:78000}];
-        if (name === 'get_system_stats') { if(f.failStats) throw new Error('sensor unavailable'); return null; }
+        if (name === 'get_system_stats') {
+          if(f.deferStats) await new Promise(resolve => { f.releaseStats = resolve; });
+          if(f.failStats) throw new Error('sensor unavailable');
+          return null;
+        }
         if (name === 'get_power_settings') return f.power;
         if (name === 'set_power_option') {
           if(f.failPowerWrite) throw new Error('power write rejected');
@@ -243,14 +259,37 @@ window.mount();
     console.log('PASS other models: supported hardware controls retained');
 
     const checksBeforeMonitor=await page.evaluate(() => window.fixture.calls.filter(x=>x==='vendor_service_state').length);
-    await page.evaluate(() => {window.fixture.failStats=true;window.mountMonitor();});
-    await page.getByText('监控不可用',{exact:true}).waitFor();
+    await page.evaluate(() => {window.fixture.failStats=true;window.fixture.deferStats=true;window.mountMonitor();});
+    await page.waitForFunction(() => typeof window.fixture.releaseStats === 'function');
+    await page.waitForTimeout(1450);
+    assert.equal(await page.evaluate(() => window.fixture.calls.filter(x=>x==='get_system_stats').length),1);
+    await page.evaluate(() => {window.fixture.deferStats=false;window.fixture.releaseStats();});
+    await page.getByText('存储采样不可用',{exact:true}).waitFor();
     await page.getByText('3000 RPM',{exact:true}).waitFor();
     assert.equal((await page.locator('body').innerText()).includes('6000 RPM'),false);
     assert.equal((await page.locator('body').innerText()).includes('299.0'),false);
     assert.equal(await page.evaluate(() => window.fixture.calls.filter(x=>x==='vendor_service_state').length),checksBeforeMonitor);
     await page.getByText('原生 WMI · 无需官方后台',{exact:true}).waitFor();
+    assert.match(await page.getByText('96 °C',{exact:true}).getAttribute('class'),/is-hot/);
+    assert.match(await page.getByText('52 °C',{exact:true}).getAttribute('class'),/is-ok/);
+    await page.getByText('共享显存',{exact:true}).waitFor();
     console.log('PASS monitor: no OEM polling, fabricated demo storage or unverified fan maximum');
+    console.log('PASS monitor: slow IPC single-flight, independent GPU temperature tone and UMA usage');
+    const trace = page.getByRole('region',{name:'性能记录'});
+    await trace.getByRole('button',{name:'开始记录'}).click();
+    await page.waitForFunction(() => window.fixture.calls.includes('plugin:event|listen'));
+    await page.evaluate(() => {
+      window.fixture.emitTelemetry({is_mock:true, cpu_usage:99});
+      window.fixture.emitTelemetry({cpu_usage:20,cpu_temp:52,gpu_usage:10,gpu_name:'AMD Radeon',gpu_temp:55});
+    });
+    await trace.getByText(/1\/600 个采样/).waitFor();
+    await trace.getByRole('button',{name:'停止记录'}).click();
+    const downloaded = page.waitForEvent('download');
+    await trace.getByRole('button',{name:'导出 CSV'}).click();
+    const download = await downloaded;
+    assert.match(download.suggestedFilename(),/^openrevo-telemetry-.*\.csv$/);
+    assert.match(require('node:fs').readFileSync(await download.path(),'utf8'),/,1,20,10,52,55,/);
+    console.log('PASS telemetry recording: ignores demo, pauses, exports actual CSV');
     assert.equal(await page.evaluate(() => window.coolerVisible(false)),false);
     assert.equal(await page.evaluate(() => window.coolerVisible(true)),true);
     console.log('PASS cooling capabilities: stale enabled preference cannot expose unsupported hardware; supported models retained');
