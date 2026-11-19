@@ -384,12 +384,13 @@ pub fn start_hardware_state_watcher(
 
 
             if crate::hal::xingyao::is_active() && last_ac_line.is_some_and(|previous| previous != is_ac) {
-                let cfg = crate::system::config::load_config();
-                let selected = if is_ac { cfg.usage_auto_ac } else { cfg.usage_auto_battery };
-                if let Some(id) = selected {
-                    match crate::commands::usage_cmd::apply_automatic_profile(id, app.clone()) {
-                        Ok(result) => { use tauri::Emitter; let _ = app.emit("usage-profile-applied", result); }
-                        Err(error) => { crate::log_warn!("USAGE_PROFILE", "{}", error); }
+                match crate::commands::usage_cmd::apply_automatic_profile(is_ac, app.clone()) {
+                    Ok(Some(result)) => { use tauri::Emitter; let _ = app.emit("usage-profile-applied", result); }
+                    Ok(None) => {}
+                    Err(error) => {
+                        crate::log_warn!("USAGE_PROFILE", "{}", error);
+                        use tauri::Emitter;
+                        let _ = app.emit("usage-profile-error", error);
                     }
                 }
             }

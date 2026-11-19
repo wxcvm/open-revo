@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import type { HardwareState } from '../../types/hardware';
 import { appendTrace, traceCsv, tracePath, traceSample, TRACE_LIMIT } from '../../state/telemetryTrace';
 import type { TraceMetric, TraceSample } from '../../state/telemetryTrace';
@@ -15,6 +16,9 @@ export function TelemetryTracePanel() {
   const [recording, setRecording] = useState(false);
   const [samples, setSamples] = useState<TraceSample[]>([]);
   const [error, setError] = useState('');
+  const [exportStatus, setExportStatus] = useState('');
+  const [saving, setSaving] = useState(false);
+  const exportPending = useRef(false);
   const active = useRef(false);
   const gap = useRef(false);
 
@@ -50,15 +54,20 @@ export function TelemetryTracePanel() {
     setError('');
     setRecording(active.current);
   };
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([traceCsv(samples)], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `openrevo-telemetry-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const download = async () => {
+    if (exportPending.current || !samples.length) return;
+    exportPending.current = true;
+    setSaving(true);
+    setExportStatus('');
+    try {
+      const path = await invoke<string | null>('export_telemetry_csv', { csv: traceCsv(samples) });
+      setExportStatus(path ? `已保存：${path}` : '已取消保存，记录仍保留。');
+    } catch (e) {
+      setExportStatus(`保存失败，记录仍保留：${String(e)}`);
+    } finally {
+      exportPending.current = false;
+      setSaving(false);
+    }
   };
   const latest = samples[samples.length - 1];
 
@@ -76,11 +85,12 @@ export function TelemetryTracePanel() {
           <button type="button" className="toggle-btn active-cyan" onClick={toggle}>
             {recording ? '停止记录' : samples.length ? '继续记录' : '开始记录'}
           </button>
-          <button type="button" className="toggle-btn" onClick={download} disabled={!latest}>导出 CSV</button>
-          <button type="button" className="toggle-btn" disabled={!latest} onClick={() => setSamples([])}>清空记录</button>
+          <button type="button" className="toggle-btn" onClick={download} disabled={!latest || saving}>{saving ? '正在保存…' : '导出 CSV'}</button>
+          <button type="button" className="toggle-btn" disabled={!latest || saving} onClick={() => setSamples([])}>清空记录</button>
         </div>
       </div>
       {error && <p className="sys-row-desc" role="alert">{error}</p>}
+      {exportStatus && <p className="sys-row-desc usage-notice" role="status">{exportStatus}</p>}
       {latest && (
         <div className="telemetry-trace-grid">
           {charts.map(({ metric, label, unit, ceiling }) => (

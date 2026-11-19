@@ -207,7 +207,7 @@ export default function AmdDriverGraphicsPanel({ className }: AmdDriverGraphicsP
     await run(feature, async () => {
       const report = await invoke<GpuUpdateReport>('set_gpu_driver_toggle', { feature, enabled });
       adopt(report.state);
-      setMessage(reportMessage(report));
+      setMessage(reportMessage(report) ?? { tone: 'info', text: '驱动设置已回读确认。' });
     });
   };
 
@@ -240,7 +240,7 @@ export default function AmdDriverGraphicsPanel({ className }: AmdDriverGraphicsP
     await run('chill_fps', async () => {
       const report = await invoke<GpuUpdateReport>('set_gpu_driver_chill_fps', { minFps: nextMin, maxFps: nextMax });
       adopt(report.state);
-      setMessage(reportMessage(report) ?? clampNote);
+      setMessage(reportMessage(report) ?? clampNote ?? { tone: 'info', text: 'Chill 帧率区间已回读确认。' });
     });
   };
 
@@ -263,7 +263,7 @@ export default function AmdDriverGraphicsPanel({ className }: AmdDriverGraphicsP
     await run('frtc_fps', async () => {
       const report = await invoke<GpuUpdateReport>('set_gpu_driver_frtc_fps', { fps: nextFps });
       adopt(report.state);
-      setMessage(reportMessage(report) ?? clampNote);
+      setMessage(reportMessage(report) ?? clampNote ?? { tone: 'info', text: 'FRTC 目标帧率已回读确认。' });
     });
   };
 
@@ -366,6 +366,9 @@ export default function AmdDriverGraphicsPanel({ className }: AmdDriverGraphicsP
         )}
 
         <div className="sys-rows">
+          {st.anti_lag.supported && st.chill.supported && <p className="sys-row-desc">
+            Anti-Lag 与 Radeon Chill 不能同时开启。开启其中一项会先关闭另一项；切换失败时仅在状态可确认时恢复原选项。
+          </p>}
           {renderToggleRow('anti_lag', 'Anti-Lag', '降低输入延迟；状态以驱动回读为准。', st.anti_lag, st)}
 
           {renderToggleRow('chill', 'Radeon Chill', '按帧率区间限制渲染节奏，降低功耗与发热。', st.chill, st)}

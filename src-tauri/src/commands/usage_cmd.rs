@@ -40,7 +40,10 @@ fn require_native() -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-pub fn set_windows_energy(mode: String) -> Result<(), String> {
+pub async fn set_windows_energy(mode: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || set_windows_energy_inner(mode)).await.map_err(|e| e.to_string())?
+}
+fn set_windows_energy_inner(mode: String) -> Result<(), String> {
     let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
     // Lock order: CONTROL then ENERGY. Held across check, write, readback and
     // the legacy-linkage config release so firmware linkage cannot race it.
@@ -53,7 +56,8 @@ pub fn set_windows_energy(mode: String) -> Result<(), String> {
     let outcome = usage_txn::classify_manual_energy(rc, requested, before, actual);
     // Explicit independent selection must not be overwritten by old firmware linkage.
     if outcome.releases_legacy_linkage() {
-        config::modify_config(|cfg| cfg.high_perf_scheme = false);
+        config::try_modify_config(|cfg| { cfg.high_perf_scheme = false; Ok(()) })
+            .map_err(|error| format!("系统能源模式已回读，但未能保存联动设置：{error}"))?;
     }
     outcome.into_result()
 }
@@ -69,8 +73,24 @@ pub struct UsageSettings {
     #[serde(default)]
     pub current_native_mode: Option<u8>,
 }
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageDraft {
+    profiles: Vec<UsageProfile>,
+    auto_ac: Option<String>,
+    auto_battery: Option<String>,
+}
+impl UsageDraft {
+    fn matches(&self, cfg: &config::AppConfig) -> bool {
+        self.profiles == cfg.usage_profiles && self.auto_ac == cfg.usage_auto_ac &&
+            self.auto_battery == cfg.usage_auto_battery
+    }
+}
 #[tauri::command]
-pub fn get_usage_settings() -> UsageSettings {
+pub async fn get_usage_settings() -> Result<UsageSettings, String> {
+    tauri::async_runtime::spawn_blocking(read_usage_settings).await.map_err(|e| e.to_string())
+}
+fn read_usage_settings() -> UsageSettings {
     let cfg = config::load_config();
     let supported = crate::hal::xingyao::is_active();
     let current_energy = read_energy().ok().and_then(|guid| ["efficiency", "balanced", "performance"]
@@ -99,15 +119,25 @@ fn validate(settings: &UsageSettings) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-pub fn save_usage_settings(settings: UsageSettings) -> Result<(), String> {
+pub async fn save_usage_settings(settings: UsageSettings, expected: UsageDraft) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || persist_usage_settings(settings, expected))
+        .await.map_err(|e| e.to_string())?
+}
+fn persist_usage_settings(settings: UsageSettings, expected: UsageDraft) -> Result<(), String> {
+    let _control = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
+    let _energy = crate::system::vendor_bus::ENERGY_LOCK.lock();
     require_native()?;
     validate(&settings)?;
-    config::modify_config(|cfg| {
+    config::try_modify_config(|cfg| {
+        if !expected.matches(cfg) {
+            return Err("已保存场景在别处发生改变。草稿未覆盖现有配置；请重新读取后再编辑。".into());
+        }
         cfg.usage_profiles = settings.profiles;
         cfg.usage_auto_ac = settings.auto_ac;
         cfg.usage_auto_battery = settings.auto_battery;
-    });
-    Ok(())
+        if cfg.has_automatic_usage_profile() { cfg.high_perf_scheme = false; }
+        Ok(())
+    })
 }
 
 #[derive(Serialize, Clone)]
@@ -124,6 +154,8 @@ pub struct ApplyResult {
     /// Every touched field was read back and confirmed at its original value.
     #[serde(default)]
     reverted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    persistence_error: Option<String>,
 }
 impl From<usage_txn::Outcome> for ApplyResult {
     fn from(outcome: usage_txn::Outcome) -> Self {
@@ -135,6 +167,7 @@ impl From<usage_txn::Outcome> for ApplyResult {
             relinquished: outcome.relinquished,
             unverified: outcome.unverified,
             reverted: outcome.reverted,
+            persistence_error: None,
         }
     }
 }
@@ -192,22 +225,30 @@ impl Backend for SystemBackend {
 }
 
 #[tauri::command]
-pub fn apply_usage_profile(id: String, app: tauri::AppHandle) -> Result<ApplyResult, String> {
-    apply_profile(id, app, true)
+pub async fn apply_usage_profile(id: String, app: tauri::AppHandle) -> Result<ApplyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || apply_profile(Some(id), None, app)?.ok_or_else(|| "未选择场景".into()))
+        .await.map_err(|e| e.to_string())?
 }
 
 /// Power events apply a scene without rewriting the user's manual AC/DC defaults.
-pub fn apply_automatic_profile(id: String, app: tauri::AppHandle) -> Result<ApplyResult, String> {
-    apply_profile(id, app, false)
+pub fn apply_automatic_profile(on_ac: bool, app: tauri::AppHandle) -> Result<Option<ApplyResult>, String> {
+    apply_profile(None, Some(on_ac), app)
 }
 
-fn apply_profile(id: String, app: tauri::AppHandle, save_manual_preferences: bool) -> Result<ApplyResult, String> {
+fn apply_profile(id: Option<String>, automatic: Option<bool>, app: tauri::AppHandle) -> Result<Option<ApplyResult>, String> {
     let _guard = crate::system::vendor_bus::CONTROL_MODE_LOCK.lock();
     // Lock order: CONTROL then ENERGY. Held over the whole transaction and the
     // config save so legacy firmware linkage cannot write between steps.
     let _energy = crate::system::vendor_bus::ENERGY_LOCK.lock();
-    require_native()?;
     let cfg = config::load_config();
+    let save_manual_preferences = automatic.is_none();
+    let id = match automatic {
+        Some(true) => cfg.usage_auto_ac.clone(),
+        Some(false) => cfg.usage_auto_battery.clone(),
+        None => id,
+    };
+    let Some(id) = id else { return Ok(None); };
+    require_native()?;
     let settings = UsageSettings { supported: true, profiles: cfg.usage_profiles, auto_ac: cfg.usage_auto_ac,
         auto_battery: cfg.usage_auto_battery, current_energy: None, current_native_mode: None };
     validate(&settings)?;
@@ -222,9 +263,9 @@ fn apply_profile(id: String, app: tauri::AppHandle, save_manual_preferences: boo
     // The engine preflights every field, stops at the first error and only
     // reverts values it can prove still belong to this attempt.
     let outcome = usage_txn::execute(&mut SystemBackend, &plan)?;
-    if !outcome.succeeded() { return Ok(ApplyResult::from(outcome)); }
+    if !outcome.succeeded() { return Ok(Some(ApplyResult::from(outcome))); }
     let (_, ac, _) = super::power_cmd::get_live_power_status();
-    config::modify_config(|cfg| {
+    let persisted = config::try_modify_config(|cfg| {
         cfg.power_mode = profile.native_mode;
         if save_manual_preferences {
             if ac { cfg.power_mode_ac = profile.native_mode; } else { cfg.power_mode_battery = profile.native_mode; }
@@ -233,12 +274,17 @@ fn apply_profile(id: String, app: tauri::AppHandle, save_manual_preferences: boo
         if save_manual_preferences {
             if let Some(value) = profile.keyboard_timeout { cfg.keyboard_sleep_timeout = value; }
         }
+        Ok(())
     });
     let bridge = app.state::<crate::driver::ec_bridge::SharedEcBridge>();
     bridge.lock().set_power_mode_from_hardware(profile.native_mode);
     crate::update_tray_power_mode(profile.native_mode);
     let _ = app.emit("physical-mode-switched", profile.native_mode);
-    Ok(ApplyResult::from(outcome))
+    let mut report = ApplyResult::from(outcome);
+    if let Err(error) = persisted {
+        report.persistence_error = Some(error);
+    }
+    Ok(Some(report))
 }
 
 #[tauri::command]

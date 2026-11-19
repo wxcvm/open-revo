@@ -87,7 +87,19 @@ window.mount();
         if (name === 'get_display_policy') return {policy:'follow_system',paths:[{target_id:256,drr_enabled:true,virtual_hz:60}]};
         if (name === 'get_native_charge_state') return {matched:false,available:false};
         if (name === 'set_windows_energy') { if(f.usageFail) throw new Error('energy rejected'); f.usage.current_energy=args.mode; return; }
-        if (name === 'save_usage_settings') { f.usage=JSON.parse(JSON.stringify(args.settings)); return; }
+        if (name === 'save_usage_settings') {
+          f.lastExpected=structuredClone(args.expected);
+          if (f.failUsageSave) throw new Error('disk write rejected');
+          f.usage=structuredClone(args.settings);
+          f.power.automatic_usage_profile=!!(f.usage.auto_ac || f.usage.auto_battery);
+          if(f.power.automatic_usage_profile) f.power.high_perf_scheme=false;
+          return;
+        }
+        if (name === 'export_telemetry_csv') {
+          f.exportedCsv=args.csv;
+          if (f.exportError) throw new Error('save permission rejected');
+          return f.exportPath || null;
+        }
         if (name === 'apply_usage_profile') return f.usageFail
           ? {applied:[],failed:['firmware: readback rejected'],rollback_failed:[],restored:[],relinquished:[],
              unverified:['firmware: readback failed; value not verified or restored'],reverted:false}
@@ -195,6 +207,26 @@ window.mount();
     assert.equal(await page.getByRole('button',{name:'Edited fixture',exact:true}).isEnabled(),true);
     assert.equal(await page.getByRole('combobox',{name:'插电场景',exact:true}).inputValue(),'');
     console.log('PASS profile editing: save does not apply hardware; automation defaults off');
+    await page.getByRole('textbox',{name:'office 名称',exact:true}).fill('Draft fixture');
+    await page.evaluate(()=>{window.fixture.usageFail=false;window.fixture.failUsageSave=true;});
+    await page.getByRole('combobox',{name:'Windows 能源模式',exact:true}).selectOption('efficiency');
+    await page.getByRole('status').filter({hasText:'Windows 能源模式已确认'}).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'office 名称',exact:true}).inputValue(),'Draft fixture');
+    await page.getByRole('button',{name:'保存配置',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'disk write rejected'}).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'office 名称',exact:true}).inputValue(),'Draft fixture');
+    assert.equal(await page.getByRole('button',{name:'保存配置',exact:true}).isEnabled(),true);
+    assert.equal(await page.evaluate(()=>window.fixture.lastExpected.profiles[0].name),'Edited fixture');
+    await page.evaluate(()=>{window.fixture.failUsageSave=false;});
+    await page.getByRole('button',{name:'复制 Draft fixture'}).click();
+    const acScene=page.getByRole('combobox',{name:'插电场景',exact:true});
+    await acScene.selectOption({label:'Draft fixture 副本'});
+    await page.getByRole('button',{name:'移除 Draft fixture 副本'}).click();
+    assert.equal(await acScene.inputValue(),'');
+    await page.getByRole('button',{name:'放弃草稿并重新读取'}).click();
+    await page.getByRole('status').filter({hasText:'已重新读取已保存的场景'}).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'office 名称',exact:true}).inputValue(),'Edited fixture');
+    console.log('PASS scene draft: survives energy change and failed save, duplicate/remove clears automation, reload restores saved data');
     await page.getByRole('button',{name:'读取／刷新',exact:true}).click();
     await page.getByText('80.7 Wh',{exact:true}).waitFor();
     await page.getByText('6.0 W',{exact:true}).waitFor();
@@ -249,6 +281,11 @@ window.mount();
     await page.getByRole('alert').filter({hasText:'power write rejected'}).waitFor();
     const powerSwitch=page.getByText('高性能电源模式',{exact:true}).locator('xpath=../../..').getByRole('switch');
     assert.equal(await powerSwitch.getAttribute('aria-checked'),'false');
+    const initialPowerWrites=await page.evaluate(()=>window.fixture.calls.filter(x=>x==='set_power_option').length);
+    await powerSwitch.focus();
+    await powerSwitch.press('Space');
+    await page.getByRole('alert').filter({hasText:'power write rejected'}).waitFor();
+    assert.equal(await page.evaluate(()=>window.fixture.calls.filter(x=>x==='set_power_option').length),initialPowerWrites+1);
     console.log('PASS power page: native unsupported EC/charge controls removed; Windows policy remains; failed write stays off');
 
     await page.evaluate(() => {window.fixture.power.supports_battery_limit=true;window.fixture.power.supports_ec_power_options=true;window.mountMini();});
@@ -284,12 +321,17 @@ window.mount();
     });
     await trace.getByText(/1\/600 个采样/).waitFor();
     await trace.getByRole('button',{name:'停止记录'}).click();
-    const downloaded = page.waitForEvent('download');
     await trace.getByRole('button',{name:'导出 CSV'}).click();
-    const download = await downloaded;
-    assert.match(download.suggestedFilename(),/^openrevo-telemetry-.*\.csv$/);
-    assert.match(require('node:fs').readFileSync(await download.path(),'utf8'),/,1,20,10,52,55,/);
-    console.log('PASS telemetry recording: ignores demo, pauses, exports actual CSV');
+    await trace.getByRole('status').filter({hasText:'已取消保存'}).waitFor();
+    assert.match(await page.evaluate(()=>window.fixture.exportedCsv),/,1,20,10,52,55,/);
+    await page.evaluate(()=>{window.fixture.exportError=true;});
+    await trace.getByRole('button',{name:'导出 CSV'}).click();
+    await trace.getByRole('status').filter({hasText:'save permission rejected'}).waitFor();
+    await trace.getByText(/1\/600 个采样/).waitFor();
+    await page.evaluate(()=>{window.fixture.exportError=false;window.fixture.exportPath='D:/notes/trace.csv';});
+    await trace.getByRole('button',{name:'导出 CSV'}).click();
+    await trace.getByRole('status').filter({hasText:'已保存：D:/notes/trace.csv'}).waitFor();
+    console.log('PASS telemetry recording: ignores demo, preserves history on cancel and failure, displays confirmed save path');
     assert.equal(await page.evaluate(() => window.coolerVisible(false)),false);
     assert.equal(await page.evaluate(() => window.coolerVisible(true)),true);
     console.log('PASS cooling capabilities: stale enabled preference cannot expose unsupported hardware; supported models retained');

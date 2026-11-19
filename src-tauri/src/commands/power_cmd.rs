@@ -17,6 +17,7 @@ pub struct PowerSettingsInfo {
     pub usb_charge_enabled: bool,
     pub ac_recovery_enabled: bool,
     pub high_perf_scheme: bool,
+    pub automatic_usage_profile: bool,
     pub sleep_guard_enabled: bool,
     pub sleep_disconnect_net: bool,
     pub sleep_block_away: bool,
@@ -584,6 +585,7 @@ pub fn query_sleep_guard_registry_states(cfg: &crate::system::config::AppConfig)
         usb_charge_enabled: usb_charge,
         ac_recovery_enabled: ac_recovery,
         high_perf_scheme: cfg.high_perf_scheme,
+        automatic_usage_profile: cfg.has_automatic_usage_profile(),
         sleep_guard_enabled,
         sleep_disconnect_net,
         sleep_block_away,
@@ -652,9 +654,7 @@ pub fn set_sleep_auto_office(
     enable: bool,
     ec_state: State<'_, SharedEcBridge>,
 ) -> Result<PowerSettingsInfo, String> {
-    let mut cfg = crate::system::config::load_config();
-    cfg.sleep_auto_office = enable;
-    crate::system::config::save_config(&cfg);
+    crate::system::config::try_modify_config(|cfg| { cfg.sleep_auto_office = enable; Ok(()) })?;
     Ok(get_power_settings(ec_state))
 }
 
@@ -708,7 +708,6 @@ pub fn set_power_option(
     let _energy = if option == "high_perf" {
         Some(crate::system::vendor_bus::ENERGY_LOCK.lock())
     } else { None };
-    let mut cfg = crate::system::config::load_config();
     match option.as_str() {
         "usb_charge" | "ac_recovery" => {
             if !crate::hal::platform_probe::needs_acpi_kernel_driver() {
@@ -717,18 +716,25 @@ pub fn set_power_option(
             crate::hal::power_options::apply_ec_option(
                 &option, enable, crate::driver::wmi_ec::wmi_modify_ec_mask,
             )?;
-            if option == "usb_charge" { cfg.usb_charge_enabled = enable; }
-            else { cfg.ac_recovery_enabled = enable; }
+            crate::system::config::try_modify_config(|cfg| {
+                if option == "usb_charge" { cfg.usb_charge_enabled = enable; }
+                else { cfg.ac_recovery_enabled = enable; }
+                Ok(())
+            }).map_err(|e| format!("硬件操作已完成，但偏好未保存：{e}"))?;
         }
         "high_perf" => {
-            cfg.high_perf_scheme = enable;
             if enable {
+                let cfg = crate::system::config::load_config();
+                if cfg.has_automatic_usage_profile() {
+                    return Err("已有插拔电场景负责切换能源模式。若要启用旧版档位联动，请先取消自动场景并保存。".into());
+                }
                 crate::system::power_mode::set_windows_power_overlay(cfg.power_mode)?;
             }
+            crate::system::config::try_modify_config(|cfg| { cfg.high_perf_scheme = enable; Ok(()) })
+                .map_err(|e| if enable { format!("Windows 能源模式已调整，但联动偏好未保存：{e}") } else { e })?;
         }
         _ => return Err("Invalid power option".into()),
     }
-    crate::system::config::save_config(&cfg);
     Ok(get_power_settings(ec_state))
 }
 

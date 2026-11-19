@@ -433,49 +433,43 @@ impl<B: GfxBackend> GfxController<B> {
             };
         }
 
-        // AntiLag and Chill are mutually exclusive in the driver: enabling one requires disabling
-        // the other first. Only act when the partner state is actually known to be enabled.
-        if enabled {
-            if let Some(partner) = mutual_exclusion_partner(feature) {
-                let partner_enabled = match partner {
-                    GfxFeature::Chill => before.chill.enabled,
-                    GfxFeature::AntiLag => before.anti_lag.enabled,
-                    _ => None,
-                };
-                match partner_enabled {
-                    Some(true) => {
-                        self.ledger.record_original(
-                            GfxField::from_toggle(partner),
-                            FieldValue::Enabled(true),
-                        );
-                        let out = self.backend.write_enabled(partner, false);
-                        let partner_state = self.backend.read_state();
-                        if partner_state.toggle(partner).enabled == Some(false) {
-                            self.ledger.record_written(GfxField::from_toggle(partner), FieldValue::Enabled(false));
-                        }
-                        if !out.succeeded() || partner_state.toggle(partner).enabled != Some(false) {
-                            return UpdateReport { applied: false, message: Some(format!("could not confirm {} disabled: {}; primary write not attempted", partner.label(), out.describe())), state: self.decorate(partner_state) };
-                        }
-                        if out.succeeded() {
-                            self.ledger.record_written(
-                                GfxField::from_toggle(partner),
-                                FieldValue::Enabled(false),
-                            );
-                            notes.push(format!(
-                                "{} disabled first (driver mutual exclusion)",
-                                partner.label()
-                            ));
-                        } else {
-                            problems.push(format!(
-                                "could not disable {} required by the mutual exclusion: {}",
-                                partner.label(),
-                                out.describe()
-                            ));
-                        }
+        // Preserve explicit unsupported vs unreadable; the former cannot
+        // conflict, the latter is not safe to guess.
+        let partner = enabled.then(|| mutual_exclusion_partner(feature)).flatten();
+        let mut switched_partner = None;
+        if let Some(partner) = partner {
+            let state = before.toggle(partner);
+            let known_unsupported = !state.supported && state.read_error.is_none();
+            match state.enabled {
+                Some(true) => {
+                    if target.enabled != Some(false) {
+                        return UpdateReport { applied: false, message: Some("target state is unreadable; existing mutually exclusive option left unchanged".into()), state: self.decorate(before) };
                     }
-                    Some(false) => {}
-                    None => return UpdateReport { applied: false, message: Some(format!("{} state is unreadable; mutual exclusion cannot be confirmed, no write attempted", partner.label())), state: self.decorate(before) },
+                    let field = GfxField::from_toggle(partner);
+                    let previous_entry = self.ledger.get(field).cloned();
+                    let out = self.backend.write_enabled(partner, false);
+                    let mut after = self.backend.read_state();
+                    if after.toggle(partner).enabled == Some(false) {
+                        self.ledger.record_original(field, FieldValue::Enabled(true));
+                        self.ledger.record_written(field, FieldValue::Enabled(false));
+                        switched_partner = Some((partner, previous_entry));
+                    }
+                    if !out.succeeded() || after.toggle(partner).enabled != Some(false) {
+                        problems.push(format!("could not confirm {} disabled: {}; primary write not attempted", partner.label(), out.describe()));
+                        if let Some((partner, previous)) = switched_partner {
+                            after = self.restore_partner_after_failed_switch(feature, partner, previous, after, &mut notes);
+                        }
+                        return UpdateReport { applied: false, message: join_text(&problems, &notes), state: self.decorate(after) };
+                    }
+                    notes.push(format!("{} disabled first (driver mutual exclusion)", partner.label()));
                 }
+                Some(false) => {}
+                None if known_unsupported => {}
+                None => return UpdateReport {
+                    applied: false,
+                    message: Some(format!("{} state is unreadable; mutual exclusion cannot be confirmed, no write attempted", partner.label())),
+                    state: self.decorate(before),
+                },
             }
         }
 
@@ -499,7 +493,7 @@ impl<B: GfxBackend> GfxController<B> {
             ));
         }
 
-        let after = self.backend.read_state();
+        let mut after = self.backend.read_state();
         let observed = after.toggle(feature).enabled;
         if observed == Some(enabled) {
             self.ledger
@@ -516,17 +510,16 @@ impl<B: GfxBackend> GfxController<B> {
             });
         }
 
-        if enabled {
-            if let Some(partner) = mutual_exclusion_partner(feature) {
-                let partner_after = after.toggle(partner).enabled;
-                if partner_after == Some(true) {
-                    problems.push(format!(
-                        "{} is still enabled; the driver requires it to be off",
-                        partner.label()
-                    ));
-                } else if partner_after.is_none() {
-                    notes.push(format!("{} state is now unknown", partner.label()));
-                }
+        if let Some(partner) = partner {
+            let readback = after.toggle(partner);
+            if readback.enabled != Some(false) && (readback.supported || readback.read_error.is_some()) {
+                problems.push(format!("{} is not confirmed off", partner.label()));
+            }
+        }
+
+        if !problems.is_empty() {
+            if let Some((partner, previous)) = switched_partner {
+                after = self.restore_partner_after_failed_switch(feature, partner, previous, after, &mut notes);
             }
         }
 
@@ -539,6 +532,34 @@ impl<B: GfxBackend> GfxController<B> {
     }
 
     /// Chill min/max FPS. Both values are valid against the driver-reported range.
+    fn restore_partner_after_failed_switch(
+        &mut self,
+        target: GfxFeature,
+        partner: GfxFeature,
+        previous: Option<LedgerEntry>,
+        state: DriverGraphicsState,
+        notes: &mut Vec<String>,
+    ) -> DriverGraphicsState {
+        if state.toggle(target).enabled != Some(false) || state.toggle(partner).enabled != Some(false) {
+            notes.push(format!("{} not automatically restored because current states do not confirm that both settings are off", partner.label()));
+            return state;
+        }
+        let _ = self.backend.write_enabled(partner, true);
+        let readback = self.backend.read_state();
+        if readback.toggle(partner).enabled == Some(true) && readback.toggle(target).enabled == Some(false) {
+            let field = GfxField::from_toggle(partner);
+            if let Some(entry) = previous {
+                if let Some(current) = self.ledger.get_mut(field) { *current = entry; }
+            } else {
+                self.ledger.entries.retain(|entry| entry.field != field);
+            }
+            notes.push(format!("{} restored and confirmed", partner.label()));
+        } else {
+            notes.push(format!("could not confirm {} restored; refresh the driver state", partner.label()));
+        }
+        readback
+    }
+
     pub fn apply_chill_fps(&mut self, min: i32, max: i32) -> UpdateReport {
         let before = self.backend.read_state();
         let mut problems: Vec<String> = Vec::new();

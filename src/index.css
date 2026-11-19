@@ -3795,6 +3795,7 @@ body,
 .usage-battery dt { color: var(--text-dim); }
 .usage-battery dd { margin: 0; color: var(--text-primary); }
 .usage-notice { color: var(--text-primary); overflow-wrap: anywhere; }
+.usage-editor-group { border: 0; margin: 0; padding: 0; min-width: 0; }
 [data-theme="mono"] .usage-panel { color: var(--text-primary); }
 
 /* === AMD driver graphics panel === */

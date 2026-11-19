@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use parking_lot::RwLock;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageProfile {
     pub id: String,
     pub name: String,
@@ -1252,8 +1252,9 @@ fn load_config_from_disk() -> AppConfig {
             }
 
             if sanitized {
-                let _ = fs::write(&path, &final_content);
-                crate::log_info!("CONFIG", "Synchronized config.json schema and ensured GPU offset limits are explicitly persisted");
+                if let Err(error) = persist_file(&path, final_content.as_bytes()) {
+                    crate::log_warn!("CONFIG", "Could not persist schema migration: {}", error);
+                }
             }
 
             if let Ok(mut cfg) = serde_json::from_str::<AppConfig>(&final_content) {
@@ -1286,8 +1287,9 @@ fn load_config_from_disk() -> AppConfig {
                 }
 
                 if missing_gpu_bounds {
-                    save_config_to_disk(&cfg);
-                    crate::log_info!("CONFIG", "Persisted explicit GPU offset bounds into config.json");
+                    if let Err(error) = save_config_to_disk(&cfg) {
+                        crate::log_warn!("CONFIG", "Could not persist GPU offset defaults: {}", error);
+                    }
                 }
                 cfg.auto_min_refresh_on_battery = false;
                 return cfg;
@@ -1297,16 +1299,34 @@ fn load_config_from_disk() -> AppConfig {
     AppConfig::default()
 }
 
-fn save_config_to_disk(cfg: &AppConfig) {
-    let path = get_config_path();
-    if let Ok(json) = serde_json::to_string_pretty(cfg) {
-        let tmp_path = path.with_extension("tmp");
-        if fs::write(&tmp_path, &json).is_ok() {
-            let _ = fs::rename(&tmp_path, &path);
-        } else {
-            let _ = fs::write(path, json);
+/// Stage and flush a sibling file before replacing the destination. A failed
+/// open/write/replace must not truncate the previous file or report success.
+pub(crate) fn persist_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let (temp, mut file) = loop {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let temp = path.with_file_name(format!(".openrevo-save-{}-{id}.tmp", std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).open(&temp) {
+            Ok(file) => break (temp, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
         }
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| fs::rename(&temp, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
     }
+    result
+}
+
+fn save_config_to_disk(cfg: &AppConfig) -> Result<(), String> {
+    let path = get_config_path();
+    let json = serde_json::to_vec_pretty(cfg).map_err(|e| e.to_string())?;
+    persist_file(&path, &json).map_err(|e| format!("无法保存配置 {}：{e}", path.display()))
 }
 
 /// Thread-safe in-memory configuration loader. Returns cached copy in <0.001ms.
@@ -1327,10 +1347,16 @@ pub fn load_config() -> AppConfig {
 pub fn save_config(cfg: &AppConfig) {
     let mut guard = CONFIG_CACHE.write();
     *guard = Some(cfg.clone());
-    save_config_to_disk(cfg);
+    if let Err(error) = save_config_to_disk(cfg) {
+        crate::log_warn!("CONFIG", "{}", error);
+    }
 }
 
 impl AppConfig {
+    pub fn has_automatic_usage_profile(&self) -> bool {
+        self.usage_auto_ac.is_some() || self.usage_auto_battery.is_some()
+    }
+
     pub fn select_vendor_control(&mut self, enabled: bool) {
         self.use_vendor_bus = enabled;
         if enabled {
@@ -1354,9 +1380,22 @@ pub fn modify_config<F: FnOnce(&mut AppConfig) -> R, R>(f: F) -> R {
         load_config_from_disk()
     };
     let res = f(&mut cfg);
-    save_config_to_disk(&cfg);
+    if let Err(error) = save_config_to_disk(&cfg) {
+        crate::log_warn!("CONFIG", "{}", error);
+    }
     *guard = Some(cfg);
     res
+}
+
+/// User-facing saves update only their owned fields and publish the new
+/// snapshot only after disk persistence succeeds.
+pub fn try_modify_config<R>(f: impl FnOnce(&mut AppConfig) -> Result<R, String>) -> Result<R, String> {
+    let mut guard = CONFIG_CACHE.write();
+    let mut cfg = guard.as_ref().cloned().unwrap_or_else(load_config_from_disk);
+    let res = f(&mut cfg)?;
+    save_config_to_disk(&cfg)?;
+    *guard = Some(cfg);
+    Ok(res)
 }
 
 /// Forces a fresh reload from disk into the in-memory cache.
@@ -1444,6 +1483,25 @@ pub fn is_module_enabled(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_persistence_replaces_a_file_and_propagates_rename_failure() {
+        let path = std::env::temp_dir().join(format!("openrevo-save-test-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+        let target = path.join("config.json");
+        fs::write(&target, b"previous").unwrap();
+        persist_file(&target, b"next").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"next");
+        let blocked = path.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        assert!(persist_file(&blocked, b"invalid").is_err());
+        assert!(blocked.is_dir());
+        assert_eq!(fs::read(&target).unwrap(), b"next");
+        assert_eq!(fs::read_dir(&path).unwrap().count(), 2, "no abandoned staging file");
+        fs::remove_file(&target).unwrap();
+        fs::remove_dir(&blocked).unwrap();
+        fs::remove_dir(&path).unwrap();
+    }
 
     #[test]
     fn test_purge_legacy_hardware_snapshot() {

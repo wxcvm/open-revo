@@ -393,7 +393,7 @@ unsafe fn read_chill(services: AdlxHandle, gpu: AdlxHandle) -> ChillState {
     let guard = AdlxGuard::new(raw);
     let vtbl = *(guard.as_void() as *const *const Adlx3DChillVtbl);
     if vtbl.is_null() {
-        return ChillState::default();
+        return ChillState { read_error: Some("Chill vtable was null".into()), ..Default::default() };
     }
     let mut supported: u8 = 0;
     let rc = ((*vtbl).is_supported)(guard.as_void(), &mut supported);

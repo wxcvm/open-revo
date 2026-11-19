@@ -1,17 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 interface Profile { id: string; name: string; native_mode: number; energy_mode: string; brightness: number | null; keyboard_timeout: number | null; refresh_hz: number | null }
 interface Settings { supported: boolean; profiles: Profile[]; auto_ac: string | null; auto_battery: string | null; current_energy: string | null; current_native_mode: number | null }
+type Draft = Pick<Settings, 'profiles' | 'auto_ac' | 'auto_battery'>;
+const draftOf = ({ profiles, auto_ac, auto_battery }: Settings): Draft => ({ profiles, auto_ac, auto_battery });
 interface BatteryData { instance: string; designed_capacity: number | null; full_capacity: number | null; remaining_capacity: number | null; charge_rate: number | null; discharge_rate: number | null; cycles: number | null; charging: boolean | null; discharging: boolean | null; capacity_relative: number | null }
 interface Policy { policy: string; paths: { target_id: number; drr_enabled: boolean; virtual_hz: number | null }[] }
-interface ApplyResult { applied: string[]; failed: string[]; rollback_failed: string[]; restored?: string[]; relinquished?: string[]; unverified?: string[]; reverted?: boolean }
+interface ApplyResult { applied: string[]; failed: string[]; rollback_failed: string[]; restored?: string[]; relinquished?: string[]; unverified?: string[]; reverted?: boolean; persistence_error?: string }
 const energyNames: Record<string, string> = { efficiency: '最佳能效', balanced: '平衡', performance: '最佳性能' };
 const positive = (value: number | null | undefined): value is number => typeof value === 'number' && value > 0 && value < 0xffffffff;
 // Only report what the backend verified by readback; never call an unknown
 // readback "restored" and never hide an externally changed value.
 const describeApply = (name: string, result: ApplyResult): string => {
-  if (!result.failed.length) return `已应用 ${name}：${result.applied.join('、')}`;
+  if (!result.failed.length) return `已应用 ${name}：${result.applied.join('、')}` +
+    (result.persistence_error ? `；硬件已回读，但偏好未保存：${result.persistence_error}` : '');
   const parts = [`应用失败：${result.failed.join('；')}`];
   if (result.rollback_failed.length) parts.push(`回退失败：${result.rollback_failed.join('；')}`);
   if (result.unverified?.length) parts.push(`读取失败，无法确认当前值（未声称已恢复）：${result.unverified.join('；')}`);
@@ -30,45 +34,117 @@ export const UsageProfilesPanel: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [autoResult, setAutoResult] = useState('');
+  const baseline = useRef<Draft | null>(null);
+  const actionPending = useRef(false);
+  const revision = useRef(0);
+  const refreshLive = async () => {
+    const current = await invoke<Settings>('get_usage_settings');
+    if (!current) return;
+    setSettings(previous => previous
+      ? { ...previous, current_energy: current.current_energy, current_native_mode: current.current_native_mode }
+      : current);
+  };
   const refreshBattery = () => {
     setBatteryError('');
     invoke<BatteryData[]>('get_battery_health').then(setBatteries).catch(e => setBatteryError(String(e)));
   };
   useEffect(() => {
     let alive = true;
-    invoke<Settings>('get_usage_settings').then(s => { if (alive) setSettings(s); }).catch(e => { if (alive) setMessage(String(e)); });
+    let polling = false;
     const refresh = () => {
-      invoke<Policy>('get_display_policy').then(p => { if (alive) setPolicy(p); }).catch(() => {});
-      invoke<Settings>('get_usage_settings').then(current => {
-        if (alive && current) setSettings(previous => previous ? { ...previous, current_energy: current.current_energy, current_native_mode: current.current_native_mode } : current);
-      }).catch(() => {});
+      if (polling || actionPending.current) return;
+      const generation = revision.current;
+      const currentResult = () => alive && generation === revision.current;
+      polling = true;
+      void Promise.allSettled([
+        invoke<Policy>('get_display_policy').then(p => { if (currentResult()) setPolicy(p); }),
+        invoke<Settings>('get_usage_settings').then(current => {
+          if (!currentResult() || !current) return;
+          if (!baseline.current) baseline.current = draftOf(current);
+          setSettings(previous => previous ? { ...previous, current_energy: current.current_energy, current_native_mode: current.current_native_mode } : current);
+        }).catch(e => { if (currentResult() && !baseline.current) setMessage(`读取场景失败：${String(e)}`); }),
+      ]).finally(() => { polling = false; });
     };
     refresh();
     const timer = setInterval(refresh, 5000);
-    return () => { alive = false; clearInterval(timer); };
+    const unsub: (() => void)[] = [];
+    const register = (pending: Promise<() => void>) => void pending.then(stop => {
+      if (alive) unsub.push(stop);
+      else stop();
+    }).catch(() => {});
+    register(listen<ApplyResult>('usage-profile-applied', ({ payload }) => {
+      if (alive) setAutoResult(describeApply('插拔电场景', payload));
+    }));
+    register(listen<string>('usage-profile-error', ({ payload }) => {
+      if (alive) setAutoResult(`自动场景未应用：${payload}`);
+    }));
+    return () => { alive = false; clearInterval(timer); unsub.forEach(stop => stop()); };
   }, []);
   const run = async (action: () => Promise<unknown>) => {
-    if (busy) return;
+    if (actionPending.current) return;
+    actionPending.current = true;
+    revision.current++;
     setBusy(true); setMessage('');
     try { await action(); } catch (e) { setMessage(String(e)); }
-    finally { setBusy(false); }
+    finally { actionPending.current = false; setBusy(false); }
   };
   const save = async () => {
-    await invoke('save_usage_settings', { settings });
-    setDirty(false); setMessage('场景配置已保存；尚未应用硬件设置');
+    if (!settings || !baseline.current) return;
+    const next = { ...settings, profiles: settings.profiles.map(p => ({ ...p, name: p.name.trim() })) };
+    if (next.profiles.some(p => !p.name)) throw new Error('场景名称不能为空');
+    await invoke('save_usage_settings', { settings: next, expected: baseline.current });
+    baseline.current = draftOf(next);
+    setSettings(next);
+    setDirty(false);
+    setMessage('场景配置已保存；尚未应用硬件设置' +
+      (next.auto_ac || next.auto_battery ? '。插拔电场景已接管能源联动，旧版档位联动已关闭。' : ''));
+  };
+  const reload = async () => {
+    const current = await invoke<Settings>('get_usage_settings');
+    if (!current) throw new Error('未读到已保存场景');
+    baseline.current = draftOf(current);
+    setSettings(current);
+    setDirty(false);
+    setMessage('已重新读取已保存的场景');
   };
   const update = (id: string, patch: Partial<Profile>) => {
+    if (actionPending.current) return;
     setSettings(s => s && ({ ...s, profiles: s.profiles.map(p => p.id === id ? { ...p, ...patch } : p) }));
     setDirty(true);
   };
+  const add = (source?: Profile) => {
+    if (!settings || actionPending.current || settings.profiles.length >= 20) return;
+    const id = `scene-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const profile = source
+      ? { ...source, id, name: `${source.name.slice(0, 35)} 副本` }
+      : { id, name: '新场景', native_mode: 2, energy_mode: 'balanced', brightness: null, keyboard_timeout: null, refresh_hz: null };
+    setSettings(s => s && ({ ...s, profiles: [...s.profiles, profile] }));
+    setEditing(true); setDirty(true);
+  };
+  const remove = (id: string) => {
+    if (!settings || actionPending.current || settings.profiles.length <= 1) return;
+    setSettings(s => s && ({
+      ...s, profiles: s.profiles.filter(p => p.id !== id),
+      auto_ac: s.auto_ac === id ? null : s.auto_ac,
+      auto_battery: s.auto_battery === id ? null : s.auto_battery,
+    }));
+    setDirty(true);
+    setMessage('草稿已移除该场景，并清除指向它的自动切换；保存后才生效。');
+  };
   return <section className="sys-sub-panel usage-panel" aria-label="场景与电池健康">
     <h3>场景与系统能源模式</h3>
+    {busy && <div role="status" className="usage-notice">正在处理场景或能源设置…</div>}
     {message && <div role="status" className="usage-notice">{message}</div>}
+    {autoResult && <div role="status" className="usage-notice">{autoResult}</div>}
     <div className="quick-row">
-      <div><strong>Windows 能源模式</strong><p className="sys-row-desc">独立于固件档位；手动选择后关闭旧版档位联动，避免被覆盖</p></div>
+      <div><strong>Windows 能源模式</strong><p className="sys-row-desc">独立于固件档位；手动选择关闭旧版档位联动。已保存的自动场景仍会在下次插拔电时接管。</p></div>
       <select aria-label="Windows 能源模式" disabled={busy || !settings} value={settings?.current_energy ?? ''} onChange={e => {
         const mode = e.target.value;
-        void run(async () => { await invoke('set_windows_energy', { mode }); setSettings(await invoke<Settings>('get_usage_settings')); });
+        void run(async () => {
+          try { await invoke('set_windows_energy', { mode }); setMessage('Windows 能源模式已确认'); }
+          finally { await refreshLive().catch(() => {}); }
+        });
       }}><option value="" disabled>未提供或正在读取</option>{Object.entries(energyNames).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select>
     </div>
     {settings?.supported && <>
@@ -77,20 +153,23 @@ export const UsageProfilesPanel: React.FC = () => {
         {settings.profiles.map(p => <button key={p.id} className="toggle-btn" disabled={busy || dirty} onClick={() => void run(async () => {
           const result = await invoke<ApplyResult>('apply_usage_profile', { id: p.id });
           setMessage(describeApply(p.name, result));
-          setSettings(await invoke<Settings>('get_usage_settings'));
-          setPolicy(await invoke<Policy>('get_display_policy'));
+          await refreshLive().catch(() => {});
+          await invoke<Policy>('get_display_policy').then(setPolicy).catch(() => {});
         })}>{p.name}</button>)}
-        <button className="toggle-btn" onClick={() => setEditing(!editing)}>{editing ? '收起编辑' : '编辑场景'}</button>
+        <button className="toggle-btn" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? '收起编辑' : '编辑场景'}</button>
+        <button className="toggle-btn" disabled={busy || settings.profiles.length >= 20} onClick={() => add()}>新建场景</button>
       </div>
       <div className="usage-actions">
         {(['auto_ac', 'auto_battery'] as const).map(key => <label key={key}>{key === 'auto_ac' ? '插电时' : '使用电池时'}
-          <select aria-label={key === 'auto_ac' ? '插电场景' : '电池场景'} disabled={busy} value={settings[key] ?? ''} onChange={e => { setSettings({ ...settings, [key]: e.target.value || null }); setDirty(true); }}>
+          <select aria-label={key === 'auto_ac' ? '插电场景' : '电池场景'} disabled={busy} value={settings[key] ?? ''} onChange={e => { const value = e.target.value || null; setSettings(s => s && ({ ...s, [key]: value })); setDirty(true); }}>
             <option value="">不自动切换</option>{settings.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>)}
         <button className="toggle-btn active-indigo" disabled={!dirty || busy} onClick={() => void run(save)}>保存配置</button>
+        {dirty && <button className="toggle-btn" disabled={busy} onClick={() => void run(reload)}>放弃草稿并重新读取</button>}
       </div>
-      {editing && settings.profiles.map(p => <div className="usage-editor" key={p.id}>
+      {dirty && <p className="sys-row-desc">有未保存草稿。保存后才能应用场景；失败不会清除草稿。</p>}
+      {editing && <fieldset className="usage-editor-group" disabled={busy}>{settings.profiles.map(p => <div className="usage-editor" key={p.id}>
         <label>名称<input aria-label={`${p.id} 名称`} maxLength={40} value={p.name} onChange={e => update(p.id, { name: e.target.value })} /></label>
         <label>固件<select value={p.native_mode} onChange={e => update(p.id, { native_mode: Number(e.target.value) })}><option value={2}>均衡</option><option value={3}>性能</option></select></label>
         <label>Windows<select value={p.energy_mode} onChange={e => update(p.id, { energy_mode: e.target.value })}>{Object.entries(energyNames).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label>
@@ -98,7 +177,11 @@ export const UsageProfilesPanel: React.FC = () => {
           <span><input type="checkbox" checked={p[key] !== null} onChange={e => update(p.id, { [key]: e.target.checked ? ({ brightness: 50, keyboard_timeout: 600, refresh_hz: 60 }[key]) : null })} />{{ brightness: '接管亮度 %', keyboard_timeout: '接管背光超时 秒（0 常亮）', refresh_hz: '接管内屏固定 Hz' }[key]}</span>
           {p[key] !== null && <input type="number" min={key === 'refresh_hz' ? 1 : 0} max={key === 'brightness' ? 100 : key === 'refresh_hz' ? 1000 : 65535} value={p[key]!} onChange={e => update(p.id, { [key]: Number(e.target.value) })} />}
         </label>)}
-      </div>)}
+        <div className="usage-actions">
+          <button type="button" className="toggle-btn" aria-label={`复制 ${p.name}`} disabled={settings.profiles.length >= 20} onClick={() => add(p)}>复制</button>
+          <button type="button" className="toggle-btn danger" aria-label={`移除 ${p.name}`} disabled={settings.profiles.length <= 1} onClick={() => remove(p.id)}>移除</button>
+        </div>
+      </div>)}</fieldset>}
     </>}
     <div className="quick-row">
       <div><strong>刷新率控制：{policy?.policy === 'fixed' ? '本次固定覆盖' : '跟随 Windows'}</strong><p className="sys-row-desc">DRR：{!policy ? '未知' : policy.paths.some(p => p.drr_enabled) ? '已启用' : '当前未启用（不代表不支持）'}；插拔电不再自动写刷新率。异常退出后的状态请在系统显示设置中确认。</p></div>

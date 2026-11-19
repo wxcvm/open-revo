@@ -1,7 +1,7 @@
 import { UsageProfilesPanel } from './UsageProfilesPanel';
 import { CpuPolicyPanel } from './tuning/CpuPolicyPanel';
 import { NativeChargePanel } from './tuning/NativeChargePanel';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Zap, Battery, Plug, ShieldCheck, Globe, Ban, Lock, Clock, Moon, Snowflake, Info } from 'lucide-react';
 import { RevBadge, RevSwitch } from './ui';
@@ -19,6 +19,7 @@ interface PowerSettingsInfo {
   usb_charge_enabled: boolean;
   ac_recovery_enabled: boolean;
   high_perf_scheme: boolean;
+  automatic_usage_profile?: boolean;
 
   // Modern Standby & Sleep Guard
   sleep_guard_enabled: boolean;
@@ -58,129 +59,85 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    invoke<PowerSettingsInfo>('get_power_settings')
-      .then((res) => {
-        if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-      })
-      .catch((e) => setError(String(e)));
+  const pending = useRef(false);
+  const readPending = useRef<number | null>(null);
+  const generation = useRef(0);
+  const [readError, setReadError] = useState('');
 
-    const timer = setInterval(() => {
-      invoke<PowerSettingsInfo>('get_power_settings')
-        .then((res) => {
-          if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-        })
-        .catch((e) => setError(String(e)));
-    }, 5000);
-    return () => clearInterval(timer);
+  const refresh = useCallback(async () => {
+    if (pending.current || readPending.current !== null) return;
+    const request = ++generation.current;
+    readPending.current = request;
+    try {
+      const current = await invoke<PowerSettingsInfo>('get_power_settings');
+      if (generation.current !== request) return;
+      if (!current) throw new Error('未读到电源状态');
+      setPowerInfo(current);
+      setLoaded(true);
+      setReadError('');
+    } catch (e) {
+      if (generation.current === request) setReadError(String(e));
+    } finally { if (readPending.current === request) readPending.current = null; }
   }, []);
 
-  const handleSelectBatteryMode = async (mode: string) => {
-    if (loading) return;
+  useEffect(() => {
+    void refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => { generation.current++; readPending.current = null; clearInterval(timer); };
+  }, [refresh]);
+
+  const write = async (command: string, args: Record<string, string | boolean>) => {
+    if (pending.current) return;
+    pending.current = true;
+    const request = ++generation.current; // Ignore any read started before the write.
     setLoading(true);
+    setError('');
     try {
-      const res = await invoke<PowerSettingsInfo>('set_battery_mode', { mode });
-      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
+      const current = await invoke<PowerSettingsInfo>(command, args);
+      if (generation.current !== request) return;
+      if (!current) throw new Error('写入后未返回状态');
+      setPowerInfo(current);
+      setReadError('');
     } catch (e) {
-      console.error('Failed to set battery mode:', e);
-      setError(String(e));
+      if (generation.current === request) setError(String(e));
     } finally {
+      pending.current = false;
       setLoading(false);
     }
   };
 
-  const handleToggleOption = async (option: 'usb_charge' | 'ac_recovery' | 'high_perf') => {
-    if (loading) return;
-    setLoading(true);
-
-    const keyMap = {
-      usb_charge: 'usb_charge_enabled',
-      ac_recovery: 'ac_recovery_enabled',
-      high_perf: 'high_perf_scheme',
+  const handleSelectBatteryMode = (mode: string) => write('set_battery_mode', { mode });
+  const handleToggleOption = (option: 'usb_charge' | 'ac_recovery' | 'high_perf') => {
+    const keys = { usb_charge: 'usb_charge_enabled', ac_recovery: 'ac_recovery_enabled', high_perf: 'high_perf_scheme' } as const;
+    if (option === 'high_perf' && powerInfo.automatic_usage_profile && !powerInfo.high_perf_scheme) {
+      setError('已有自动场景负责能源联动。请先在上方取消插电／电池自动场景并保存。');
+      return;
+    }
+    void write('set_power_option', { option, enable: !powerInfo[keys[option]] });
+  };
+  const handleToggleSleepGuard = (option: 'disconnect_net' | 'block_away' | 'ignore_sysreq' | 'disable_wake_timers' | 'deep_sleep' | 'hibernate_30m') => {
+    const keys = {
+      disconnect_net: 'sleep_disconnect_net', block_away: 'sleep_block_away',
+      ignore_sysreq: 'sleep_ignore_sysreq', disable_wake_timers: 'sleep_disable_wake_timers',
+      deep_sleep: 'sleep_deep_sleep', hibernate_30m: 'sleep_hibernate_30m',
     } as const;
-
-    const nextVal = !powerInfo[keyMap[option]];
-
-    try {
-      const res = await invoke<PowerSettingsInfo>('set_power_option', { option, enable: nextVal });
-      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-    } catch (e) {
-      console.error(`Failed to toggle ${option}:`, e);
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
+    void write('set_sleep_guard_option', { option, enable: !powerInfo[keys[option]] });
   };
-
-  const handleToggleSleepGuard = async (
-    option: 'disconnect_net' | 'block_away' | 'ignore_sysreq' | 'disable_wake_timers' | 'deep_sleep' | 'hibernate_30m'
-  ) => {
-    if (loading) return;
-    setLoading(true);
-
-    const keyMap = {
-      disconnect_net: 'sleep_disconnect_net',
-      block_away: 'sleep_block_away',
-      ignore_sysreq: 'sleep_ignore_sysreq',
-      disable_wake_timers: 'sleep_disable_wake_timers',
-      deep_sleep: 'sleep_deep_sleep',
-      hibernate_30m: 'sleep_hibernate_30m',
-    } as const;
-
-    const nextVal = !powerInfo[keyMap[option]];
-
-    try {
-      const res = await invoke<PowerSettingsInfo>('set_sleep_guard_option', { option, enable: nextVal });
-      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-    } catch (e) {
-      console.error(`Failed to toggle sleep guard option ${option}:`, e);
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleToggleMasterGuard = async () => {
-    if (loading) return;
-    setLoading(true);
-    const nextVal = !powerInfo.sleep_guard_enabled;
-
-
-    try {
-      const res = await invoke<PowerSettingsInfo>('set_master_sleep_guard', { enable: nextVal });
-      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-    } catch (e) {
-      console.error('Failed to set master sleep guard:', e);
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleToggleAutoOffice = async () => {
-    if (loading) return;
-    setLoading(true);
-    const nextVal = !powerInfo.sleep_auto_office;
-
-    try {
-      const res = await invoke<PowerSettingsInfo>('set_sleep_auto_office', { enable: nextVal });
-      if (res) { setPowerInfo(res); setLoaded(true); setError(''); }
-    } catch (e) {
-      console.error('Failed to set auto office on sleep:', e);
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!loaded) return <div className="quick-row" role="status">{error || '正在读取电源状态…'}</div>;
+  const handleToggleMasterGuard = () => write('set_master_sleep_guard', { enable: !powerInfo.sleep_guard_enabled });
+  const handleToggleAutoOffice = () => write('set_sleep_auto_office', { enable: !powerInfo.sleep_auto_office });
 
   return (
     <div className="power-view-container">
       <UsageProfilesPanel />
       <CpuPolicyPanel />
       <NativeChargePanel />
+      {loading && <div className="quick-row" role="status">正在应用电源设置…</div>}
       {error && <div className="quick-row" role="alert">{error}</div>}
+      {readError && <div className="quick-row" role="alert"><span>电源状态读取失败：{readError}</span>
+        <button type="button" className="toggle-btn" onClick={refresh}>重试读取</button>
+      </div>}
+      {!loaded && !readError && <div className="quick-row" role="status">正在读取电源状态…</div>}
+      {loaded && <>
       {/* 1. Top Header Bar with Auto Office Checkbox */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -212,6 +169,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_auto_office}
               onChange={handleToggleAutoOffice}
               size="sm"
@@ -256,6 +214,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
           </div>
 
           <RevSwitch
+            disabled={loading}
             checked={powerInfo.sleep_guard_enabled}
             onChange={handleToggleMasterGuard}
             size="md"
@@ -281,6 +240,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_disconnect_net}
               onChange={() => handleToggleSleepGuard('disconnect_net')}
               size="sm"
@@ -304,6 +264,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_block_away}
               onChange={() => handleToggleSleepGuard('block_away')}
               size="sm"
@@ -327,6 +288,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_ignore_sysreq}
               onChange={() => handleToggleSleepGuard('ignore_sysreq')}
               size="sm"
@@ -350,6 +312,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_disable_wake_timers}
               onChange={() => handleToggleSleepGuard('disable_wake_timers')}
               size="sm"
@@ -373,6 +336,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_deep_sleep}
               onChange={() => handleToggleSleepGuard('deep_sleep')}
               size="sm"
@@ -396,6 +360,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               </div>
             </div>
             <RevSwitch
+              disabled={loading}
               checked={powerInfo.sleep_hibernate_30m}
               onChange={() => handleToggleSleepGuard('hibernate_30m')}
               size="sm"
@@ -433,6 +398,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)' }}>关机下使用USB给电</span>
               <RevSwitch
+                disabled={loading}
                 checked={powerInfo.usb_charge_enabled}
                 onChange={() => handleToggleOption('usb_charge')}
                 size="sm"
@@ -460,6 +426,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-primary)' }}>来电自动开机 (AC Recovery)</span>
               <RevSwitch
+                disabled={loading}
                 checked={powerInfo.ac_recovery_enabled}
                 onChange={() => handleToggleOption('ac_recovery')}
                 size="sm"
@@ -498,6 +465,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
                 </div>
               </div>
               <RevSwitch
+                disabled={loading || (!!powerInfo.automatic_usage_profile && !powerInfo.high_perf_scheme)}
                 checked={powerInfo.high_perf_scheme}
                 onChange={() => handleToggleOption('high_perf')}
                 size="sm"
@@ -505,7 +473,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
               />
             </div>
             <div style={{ fontSize: '9.5px', color: 'var(--text-dim)', lineHeight: '1.35' }}>
-              开启后根据当前性能档位同步 Windows 电源模式；关闭后不随档位切换。
+              {powerInfo.automatic_usage_profile ? '已由插拔电场景接管。要恢复旧联动，先取消自动场景并保存。' : '开启后按固件档位联动 Windows 能源模式；关闭后不随档位切换。'}
             </div>
           </div>
         </div>
@@ -656,6 +624,7 @@ export const PowerTuningView: React.FC<{ sleepModeName?: string }> = ({ sleepMod
           </div>
         </div>
       </div>
+      </>}
     </div>
   );
 };

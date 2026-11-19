@@ -240,8 +240,15 @@ pub fn get_app_config() -> crate::system::config::AppConfig {
 
 #[tauri::command]
 pub fn save_app_config(cfg: crate::system::config::AppConfig) -> Result<(), String> {
-    crate::system::config::save_config(&cfg);
-    Ok(())
+    // The custom tuning UI sends a cached full snapshot but owns only four
+    // bounds; never overwrite current scene, OSD or automation settings.
+    crate::system::config::try_modify_config(|current| {
+        current.cpu_temp_target_max = cfg.cpu_temp_target_max;
+        current.cpu_pl1_max = cfg.cpu_pl1_max;
+        current.cpu_pl2_max = cfg.cpu_pl2_max;
+        current.cpu_pl4_max = cfg.cpu_pl4_max;
+        Ok(())
+    })
 }
 
 #[tauri::command]

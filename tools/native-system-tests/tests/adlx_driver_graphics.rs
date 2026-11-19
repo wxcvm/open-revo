@@ -27,6 +27,7 @@ enum Mode {
     ApplyThenFail,
     /// Driver applies the write but the readback becomes unreadable.
     UnreadableAfter,
+    RejectAntiLag,
 }
 
 struct Mock {
@@ -64,6 +65,7 @@ impl Mock {
                 WriteOutcome::with_detail(RC_FAIL, "scripted late failure"),
             ),
             Mode::UnreadableAfter => (true, WriteOutcome::new(RC_OK)),
+            Mode::RejectAntiLag => (true, WriteOutcome::new(RC_OK)),
         }
     }
 
@@ -87,6 +89,9 @@ impl GfxBackend for Mock {
 
     fn write_enabled(&mut self, feature: GfxFeature, enabled: bool) -> WriteOutcome {
         self.writes.push(format!("{}={}", feature.key(), enabled));
+        if self.mode == Mode::RejectAntiLag && feature == GfxFeature::AntiLag {
+            return WriteOutcome::with_detail(RC_FAIL, "target refused");
+        }
         let supported = self.state.toggle(feature).supported;
         if !supported {
             return WriteOutcome::new(RC_NOT_SUPPORTED);
@@ -611,6 +616,25 @@ fn unknown_partner_state_stops_before_any_write() {
     let mut ctl = GfxController::new(mock, Ledger::new());
     assert!(!ctl.apply_toggle(GfxFeature::AntiLag, true).applied);
     assert!(ctl.into_ledger().entries.is_empty());
+}
+
+#[test]
+fn rejected_switch_restores_the_previously_working_partner() {
+    let mut ctl = GfxController::new(Mock::with_mode(Mode::RejectAntiLag), Ledger::new());
+    let report = ctl.apply_toggle(GfxFeature::AntiLag, true);
+    assert!(!report.applied);
+    assert_eq!(report.state.anti_lag.enabled, Some(false));
+    assert_eq!(report.state.chill.enabled, Some(true));
+    assert!(report.message.unwrap().contains("restored and confirmed"));
+    assert!(ctl.ledger().get(GfxField::Chill).is_none());
+}
+
+#[test]
+fn known_unsupported_partner_is_not_an_unreadable_conflict() {
+    let mut mock = Mock::new();
+    mock.state.chill = ChillState::default();
+    let mut ctl = GfxController::new(mock, Ledger::new());
+    assert!(ctl.apply_toggle(GfxFeature::AntiLag, true).applied);
 }
 
 #[test]

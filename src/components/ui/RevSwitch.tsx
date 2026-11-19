@@ -58,6 +58,14 @@ export const RevSwitch: React.FC<RevSwitchProps> = ({
     <div
       role="switch"
       aria-checked={checked}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      onKeyDown={(e) => {
+        if (e.key !== ' ' && e.key !== 'Enter') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!disabled && !e.repeat) onChange(!checked);
+      }}
       onClick={(e) => {
         e.stopPropagation();
         if (!disabled) onChange(!checked);

@@ -124,7 +124,7 @@ pub fn apply_windows_power_overlay(ui_mode: u8) {
     // is only consulted after the lock is held.
     let _energy = crate::system::vendor_bus::ENERGY_LOCK.lock();
     let cfg = crate::system::config::load_config();
-    if !cfg.high_perf_scheme {
+    if !cfg.high_perf_scheme || cfg.has_automatic_usage_profile() {
         crate::log_info!("POWER_MODE", "apply_windows_power_overlay skipped: high_perf_scheme link is disabled");
         return;
     }
