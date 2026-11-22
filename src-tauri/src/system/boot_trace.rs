@@ -1,7 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use tauri::Manager;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, OnceLock};
 use std::time::Instant;
@@ -113,7 +112,10 @@ pub fn record_stage0_ui_ready() {
 
 /// Record that frontend React/Vue application mounted, executed first render, and established two-way IPC handshake.
 #[tauri::command]
-pub fn frontend_ready(app: tauri::AppHandle) -> Result<u128, String> {
+pub fn frontend_ready(window: tauri::WebviewWindow) -> Result<u128, String> {
+    if window.label() != "main" {
+        return Err("The main window owns the startup handshake".into());
+    }
     let total = BOOT_START_INSTANT.get().map(|s| s.elapsed().as_millis()).unwrap_or(0);
     boot_log(
         "FE_READY",
@@ -121,20 +123,9 @@ pub fn frontend_ready(app: tauri::AppHandle) -> Result<u128, String> {
     );
     mark_boot_completed();
     crate::system::webview_orchestrator::WebviewOrchestrator::global().notify_main_ready();
-
-    // Diagnostics & Visibility Override: Auto-reveal main window only if explicitly requested
-    // via CLI argument (--visible / --show) or persistent config.json ("launch_visible": true).
-    let args: Vec<String> = std::env::args().collect();
-    let cli_visible = args.iter().any(|a| a == "--visible" || a == "--show");
-    let cfg = crate::system::config::load_config();
-    let should_reveal = cli_visible || cfg.launch_visible;
-
-    if should_reveal {
-        if let Some(window) = app.get_webview_window("main") {
-            crate::log_info!("BOOT", "Diagnostic auto-reveal triggered (CLI --visible or config.json launch_visible): revealing main window");
-            crate::system::window::restore_and_sync_window(&window);
-        }
-    }
+    crate::system::telemetry::set_main_window_visible(
+        window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true),
+    );
 
     Ok(total)
 }

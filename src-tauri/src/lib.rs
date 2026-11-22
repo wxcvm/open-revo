@@ -150,8 +150,8 @@ pub fn run() {
     let single_instance_plugin = crate::system::boot_trace::boot_scope("Step 5: SingleInstance Plugin", || {
         tauri_plugin_single_instance::init(|app, argv, _cwd| {
             crate::system::boot_trace::boot_log("SINGLE_INST", &format!("Another instance attempted launch with args: {:?}", argv));
-            if let Some(window) = crate::system::window::ensure_window_alive(app) {
-                crate::system::window::restore_and_sync_window(&window);
+            if crate::system::window::should_show_on_launch(argv.iter().skip(1), false) {
+                crate::system::window::request_main_window(app, crate::system::window::MainWindowMode::Preferred);
             }
         })
     });
@@ -498,7 +498,21 @@ pub fn run() {
         .on_window_event(crate::system::window::handle_window_event)
         .build(tauri::generate_context!())
         .expect("error while building OpenRevo application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Ready = &event {
+                let configured = crate::system::config::load_config().launch_visible;
+                if crate::system::window::should_show_on_launch(std::env::args().skip(1), configured) {
+                    crate::system::window::request_main_window(app_handle, crate::system::window::MainWindowMode::Preferred);
+                }
+            }
+            #[cfg(windows)]
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+                // A vanished last window must not take a tray application down.
+                // Explicit tray Quit uses AppHandle::exit with a code.
+                if app_handle.try_state::<TrayKeeper>().is_some() {
+                    api.prevent_exit();
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 crate::system::resources::flush_on_exit();
                 crate::hal::adlx::service::shutdown();

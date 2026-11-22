@@ -312,18 +312,7 @@ pub fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
             button: MouseButton::Left,
             ..
         } => {
-            let app = tray.app_handle();
-            if let Some(window) = crate::system::window::ensure_window_alive(app) {
-                crate::log_info!(
-                    "TRAY",
-                    "Left click triggered. Current state: is_visible={:?}, is_minimized={:?}",
-                    window.is_visible(),
-                    window.is_minimized()
-                );
-                crate::system::window::restore_and_sync_window(&window);
-            } else {
-                crate::log_error!("TRAY", "CRITICAL: Unable to obtain or resurrect 'main' WebviewWindow on tray click!");
-            }
+            crate::system::window::request_main_window(tray.app_handle(), crate::system::window::MainWindowMode::Preferred);
         }
         _ => {}
     }

@@ -321,6 +321,8 @@ export default function App() {
   useEffect(() => {
     if (isBldPreview) return;
     // Initial sync from persistent config on boot
+    // The mounted main WebView is ready independently of optional skins/backgrounds.
+    void invoke('frontend_ready').catch(() => {});
     const bootSync = async () => {
       try {
         const cfg = await invoke<any>('get_app_config');
@@ -380,10 +382,6 @@ export default function App() {
         }
       } catch (_) {}
 
-      try {
-        await invoke('frontend_ready');
-        await invoke('report_window_visibility', { visible: true });
-      } catch (_) {}
       fetchStatus();
     };
     bootSync();

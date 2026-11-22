@@ -10,7 +10,7 @@ use crate::driver::gpu_bridge::SharedGpuBridge;
 use crate::commands::system_cmd::collect_hardware_state;
 
 static ACTIVE_SUBSCRIBERS: AtomicU32 = AtomicU32::new(0);
-static MAIN_WINDOW_VISIBLE: AtomicBool = AtomicBool::new(true);
+static MAIN_WINDOW_VISIBLE: AtomicBool = AtomicBool::new(false);
 static SCREEN_SUSPENDED: AtomicBool = AtomicBool::new(false);
 static SUSPEND_EPOCH: AtomicU32 = AtomicU32::new(0);
 static RESOURCE_PAUSE: AtomicU32 = AtomicU32::new(0);

@@ -1,7 +1,8 @@
 // OpenRevo - Window Lifecycle & Desktop Drawer Management
 // Handles window alignment, tray overflow anti-flicker hack, and window events.
 
-use tauri::{Emitter, Manager, WebviewWindow, Window, WindowEvent};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent};
 
 #[cfg(windows)]
 pub fn dismiss_windows_tray_overflow() {
@@ -187,6 +188,29 @@ pub fn mark_window_woken() {
 
 /// Restores the main window, dismisses the tray overflow flyout, and synchronizes mini/expanded layout.
 pub fn restore_and_sync_window(window: &WebviewWindow) {
+    restore_main(window, MainWindowMode::Preferred);
+}
+
+#[derive(Clone, Copy)]
+pub enum MainWindowMode {
+    Preferred,
+    Full,
+    Mini,
+}
+
+pub fn should_show_on_launch(args: impl IntoIterator<Item = impl AsRef<str>>, configured: bool) -> bool {
+    let mut background = false;
+    for arg in args {
+        match arg.as_ref() {
+            "--visible" | "--show" => return true,
+            "--minimized" => background = true,
+            _ => {}
+        }
+    }
+    configured || !background
+}
+
+fn restore_main(window: &WebviewWindow, mode: MainWindowMode) {
     mark_window_woken();
     #[cfg(windows)]
     {
@@ -201,11 +225,14 @@ pub fn restore_and_sync_window(window: &WebviewWindow) {
     }
 
     // Step 1: Determine presentation mode and apply resize/sync while window is still hidden
-    let cfg = crate::system::config::load_config();
-    let is_expanded = match cfg.wake_window_mode.as_str() {
-        "full" => true,
-        "mini" => false,
-        _ => is_window_expanded(window),
+    let is_expanded = match mode {
+        MainWindowMode::Full => true,
+        MainWindowMode::Mini => false,
+        MainWindowMode::Preferred => match crate::system::config::load_config().wake_window_mode.as_str() {
+            "full" => true,
+            "mini" => false,
+            _ => is_window_expanded(window),
+        },
     };
     crate::system::tray::update_tray_window_mode(is_expanded);
 
@@ -219,9 +246,6 @@ pub fn restore_and_sync_window(window: &WebviewWindow) {
     }
 
     // Step 2: Window coordinates and dimensions are now fully prepared behind the scenes. Present to user.
-    if window.label() == "main" {
-        crate::system::telemetry::set_main_window_visible(true);
-    }
     let show_res = window.show();
     let unmin_res = window.unminimize();
     let top_res = window.set_always_on_top(true);
@@ -260,6 +284,11 @@ pub fn restore_and_sync_window(window: &WebviewWindow) {
     }
 
     let _ = window.eval("window.focus && window.focus()");
+    if window.label() == "main" {
+        crate::system::telemetry::set_main_window_visible(
+            window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true),
+        );
+    }
 
     // Release always-on-top so the mini window behaves naturally with user focus
     let win_clone = window.clone();
@@ -281,37 +310,62 @@ pub fn is_window_expanded(window: &WebviewWindow) -> bool {
 
 /// Explicitly switches window to Full Panel mode and updates tray checkmarks.
 pub fn switch_to_full_panel(app: &tauri::AppHandle) {
-    if let Some(window) = ensure_window_alive(app) {
-        crate::system::telemetry::set_main_window_visible(true);
-        let _ = crate::commands::window_cmd::resize_window(app.clone(), true);
-        let _ = window.emit("sync-window-mode", true);
-        crate::system::tray::update_tray_window_mode(true);
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        let _ = window.set_skip_taskbar(false);
-    }
+    request_main_window(app, MainWindowMode::Full);
 }
 
 /// Explicitly switches window to Mini Drawer mode and updates tray checkmarks.
 pub fn switch_to_mini_drawer(app: &tauri::AppHandle) {
-    if let Some(window) = ensure_window_alive(app) {
-        crate::system::telemetry::set_main_window_visible(true);
-        let _ = crate::commands::window_cmd::resize_window(app.clone(), false);
-        let _ = window.emit("reset-to-mini", ());
-        let _ = window.emit("sync-window-mode", false);
-        crate::system::tray::update_tray_window_mode(false);
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        let _ = window.set_skip_taskbar(false);
-        mark_window_woken();
-    }
+    request_main_window(app, MainWindowMode::Mini);
 }
 
-/// Safely retrieves the main WebviewWindow instance if alive.
+/// Look up the main window without creating it (e.g. when rendering the tray menu).
 pub fn ensure_window_alive(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("main")
+}
+
+static REBUILDING_MAIN: AtomicBool = AtomicBool::new(false);
+
+/// A tray icon can outlive its main WebView. User-facing entry points must be able
+/// to rebuild the missing window, not silently treat a running process as a UI.
+pub fn request_main_window(app: &AppHandle, mode: MainWindowMode) {
+    if let Some(window) = ensure_window_alive(app) {
+        restore_main(&window, mode);
+        return;
+    }
+    if REBUILDING_MAIN.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let app = app.clone();
+    // Window creation is blocking on Windows; leave the tray/event-loop callback
+    // before calling the builder so WebView2 can complete on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        struct RebuildGuard;
+        impl Drop for RebuildGuard {
+            fn drop(&mut self) {
+                REBUILDING_MAIN.store(false, Ordering::Release);
+            }
+        }
+        let _guard = RebuildGuard;
+        if let Some(window) = ensure_window_alive(&app) {
+            restore_main(&window, mode);
+            return;
+        }
+        crate::system::boot_trace::boot_log("UI_REPAIR", "Main window missing; recreating on user request");
+        let result = (|| -> Result<WebviewWindow, String> {
+            let config = app.config().app.windows.iter().find(|config| config.label == "main")
+                .ok_or_else(|| "Missing main window configuration".to_string())?;
+            WebviewWindowBuilder::from_config(&app, config)
+                .and_then(|builder| builder.build()).map_err(|error| error.to_string())
+        })();
+        match result {
+            Ok(window) => {
+                init_main_window(&window);
+                restore_main(&window, mode);
+                crate::system::boot_trace::boot_log("UI_REPAIR", "Main window recreated; waiting for frontend handshake");
+            }
+            Err(error) => crate::system::boot_trace::boot_log("UI_REPAIR", &format!("Main window recreation failed: {error}")),
+        }
+    });
 }
 
 /// Toggles between hiding and restoring the mini drawer window.
@@ -325,6 +379,8 @@ pub fn show_or_toggle_drawer(app: &tauri::AppHandle) {
         } else {
             restore_and_sync_window(&window);
         }
+    } else {
+        request_main_window(app, MainWindowMode::Preferred);
     }
 }
 
@@ -464,6 +520,25 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
                 crate::system::telemetry::set_main_window_visible(false);
             }
         }
+        WindowEvent::Destroyed if window.label() == "main" => {
+            crate::system::telemetry::set_main_window_visible(false);
+            crate::system::boot_trace::boot_log("UI_LOST", "Native main window destroyed");
+        }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_show_on_launch;
+
+    #[test]
+    fn manual_launch_opens_main_but_autostart_remains_in_tray() {
+        assert!(should_show_on_launch(["open-revo.exe"], false));
+        assert!(should_show_on_launch(["open-revo.exe", "--log"], false));
+        assert!(!should_show_on_launch(["open-revo.exe", "--minimized", "--log"], false));
+        assert!(should_show_on_launch(["open-revo.exe", "--minimized", "--show"], false));
+        assert!(should_show_on_launch(["open-revo.exe", "--visible", "--minimized"], false));
+        assert!(should_show_on_launch(["open-revo.exe", "--minimized"], true));
     }
 }
