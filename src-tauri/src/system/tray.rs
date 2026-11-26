@@ -42,6 +42,7 @@ pub struct TrayMenuControls {
     pub beast: CheckMenuItem<tauri::Wry>,
     pub custom: CheckMenuItem<tauri::Wry>,
     pub fan_boost: CheckMenuItem<tauri::Wry>,
+    pub background_awake: CheckMenuItem<tauri::Wry>,
 }
 
 pub struct TrayKeeper(#[allow(dead_code)] pub TrayIcon);
@@ -71,6 +72,14 @@ pub fn update_tray_power_mode(mode: u8) {
 pub fn update_tray_fan_boost(enabled: bool) {
     if let Some(ctrl) = TRAY_MENU_CONTROLS.get() {
         let _ = ctrl.fan_boost.set_checked(enabled);
+    }
+}
+
+pub(crate) fn update_background_awake(enabled: bool, failed: bool) {
+    if let Some(ctrl) = TRAY_MENU_CONTROLS.get() {
+        let _ = ctrl.background_awake.set_checked(enabled);
+        let label = if failed { "后台保活（Windows 请求失败）" } else { "后台保活（允许熄屏）" };
+        let _ = ctrl.background_awake.set_text(label);
     }
 }
 
@@ -105,6 +114,9 @@ pub fn build_tray_menu(
     let full_panel_item = CheckMenuItem::with_id(app, "mode_full_panel", "🖥️ 完整面板", true, is_expanded, None::<&str>)?;
     let mini_drawer_item = CheckMenuItem::with_id(app, "mode_mini_drawer", "🪟 迷你抽屉", true, !is_expanded, None::<&str>)?;
     let turn_off_screen_item = MenuItem::with_id(app, "turn_off_screen", "🌙 关闭屏幕 (3秒防误触)", true, None::<&str>)?;
+    let background_awake_item = CheckMenuItem::with_id(
+        app, "background_awake", "后台保活（允许熄屏）", true, crate::system::background_awake::active(), None::<&str>,
+    )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     let initial_mode = ec.lock().get_power_mode();
@@ -133,6 +145,7 @@ pub fn build_tray_menu(
         beast: beast_item.clone(),
         custom: custom_item.clone(),
         fan_boost: fan_boost_item.clone(),
+        background_awake: background_awake_item.clone(),
     });
 
     Menu::with_items(
@@ -140,6 +153,7 @@ pub fn build_tray_menu(
         &[
             &full_panel_item,
             &mini_drawer_item,
+            &background_awake_item,
             &turn_off_screen_item,
             &sep1,
             &office_item,
@@ -163,6 +177,7 @@ pub fn handle_tray_menu_event(
     ec_clone: &Arc<Mutex<EcBridge>>,
 ) {
     match event_id {
+        "background_awake" => crate::system::background_awake::toggle_from_tray(app_handle),
         "mode_full_panel" => {
             crate::log_info!("TRAY", "Menu 'mode_full_panel' (完整面板) clicked");
             crate::system::window::switch_to_full_panel(app_handle);

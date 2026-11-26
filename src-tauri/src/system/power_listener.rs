@@ -180,6 +180,7 @@ unsafe extern "system" fn power_wnd_proc(
         WM_POWERBROADCAST => {
             let pbt = wparam.0 as u32;
             if pbt == PBT_APMSUSPEND {
+                crate::system::background_awake::release_for_sleep();
                 set_resource_pause(ResourcePause::SystemSuspended, true);
                 // If Keep-Awake is active or screen was turned off for overnight tasks,
                 // NEVER degrade power mode to Office (1) and NEVER shut down water cooling!

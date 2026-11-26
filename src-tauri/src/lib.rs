@@ -268,6 +268,8 @@ pub fn run() {
             commands::hardware_cmd::get_app_config,
             commands::hardware_cmd::save_app_config,
             commands::hardware_cmd::get_device_switches,
+            crate::system::background_awake::get_background_awake,
+            crate::system::background_awake::set_background_awake,
             commands::hardware_cmd::set_device_switch,
             commands::hardware_cmd::get_gpu_mode_info,
             commands::hardware_cmd::set_gpu_mode,
@@ -510,6 +512,7 @@ pub fn run() {
                 }
             }
             if let tauri::RunEvent::Exit = event {
+                crate::system::background_awake::release();
                 crate::system::resources::flush_on_exit();
                 crate::hal::adlx::service::shutdown();
                 let _ = crate::system::display_policy::follow_system();

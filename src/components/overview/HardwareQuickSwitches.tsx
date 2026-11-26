@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { HardwareState } from '../../types/hardware';
 import { OsdConfig } from '../SystemSettingsView';
+import { BackgroundAwakeSwitch } from './BackgroundAwakeSwitch';
 
 export interface QuickSwitchesState {
   wifi: boolean;
@@ -322,6 +323,8 @@ export const HardwareQuickSwitches: React.FC<HardwareQuickSwitchesProps> = ({
           </div>
           <div className="oem-switch-title">防休眠</div>
         </div>
+
+        <BackgroundAwakeSwitch />
 
         {/* 10. 关闭屏幕 (3秒防外设误触唤醒) */}
         <div

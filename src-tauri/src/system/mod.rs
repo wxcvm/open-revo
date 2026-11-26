@@ -1,4 +1,5 @@
 pub mod autostart;
+pub mod background_awake;
 pub mod config;
 pub mod display;
 pub mod hooks;
