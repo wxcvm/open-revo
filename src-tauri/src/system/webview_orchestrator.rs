@@ -9,6 +9,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
+// A tray request can create the main WebView while a background subview is
+// queued. Serialize the actual WebView2 construction across both entry paths.
+pub(crate) static WEBVIEW_CREATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Specific window creation task payload
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowTaskType {
@@ -22,7 +26,7 @@ pub enum WindowTaskType {
 pub struct WebviewOrchestrator {
     app: OnceLock<AppHandle>,
     queue: Mutex<VecDeque<WindowTaskType>>,
-    is_main_ready: AtomicBool,
+    secondary_allowed: AtomicBool,
     is_worker_running: AtomicBool,
 }
 
@@ -33,7 +37,7 @@ impl WebviewOrchestrator {
         INSTANCE.get_or_init(|| WebviewOrchestrator {
             app: OnceLock::new(),
             queue: Mutex::new(VecDeque::new()),
-            is_main_ready: AtomicBool::new(false),
+            secondary_allowed: AtomicBool::new(false),
             is_worker_running: AtomicBool::new(false),
         })
     }
@@ -54,18 +58,19 @@ impl WebviewOrchestrator {
     /// Signal from frontend that the primary 'main' Webview DOM mounted and IPC loop is 100% active.
     /// This is the inviolable gatekeeper: unlocks the FIFO queue for secondary webview creation.
     pub fn notify_main_ready(&self) {
-        if !self.is_main_ready.swap(true, Ordering::SeqCst) {
+        self.allow_secondary_windows();
+    }
+
+    /// Tray-only launch has no main renderer to wait for. The creation lock
+    /// still protects OSD, widget and later main-window construction.
+    pub(crate) fn allow_secondary_windows(&self) {
+        if !self.secondary_allowed.swap(true, Ordering::SeqCst) {
             crate::log_info!(
                 "ORCHESTRATOR",
-                "Main window handshake verified! Sub-webview FIFO pipeline unlocked."
+                "Secondary WebView queue unlocked."
             );
             self.ensure_worker();
         }
-    }
-
-    /// Check if primary window is ready
-    pub fn is_main_ready(&self) -> bool {
-        self.is_main_ready.load(Ordering::Relaxed)
     }
 
     /// Enqueue a secondary window creation task
@@ -114,8 +119,7 @@ impl WebviewOrchestrator {
         loop {
             let orchestrator = Self::global();
 
-            // Gatekeeper 1: Wait until primary window has confirmed responsiveness
-            if !orchestrator.is_main_ready.load(Ordering::Relaxed) {
+            if !orchestrator.secondary_allowed.load(Ordering::Relaxed) {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
             }
@@ -138,6 +142,7 @@ impl WebviewOrchestrator {
             };
 
             // Gatekeeper 2: Execute task with deterministic 2500ms circuit-breaker watchdog
+            let creation = WEBVIEW_CREATION.lock().await;
             crate::log_info!("ORCHESTRATOR", "Processing dequeued task: {:?}", task);
             match task {
                 WindowTaskType::Osd => {
@@ -214,6 +219,7 @@ impl WebviewOrchestrator {
                 }
             }
 
+            drop(creation);
             // Gatekeeper 3: Staggered cooldown period (150ms) to smooth out Chromium GPU composition spikes
             tokio::time::sleep(Duration::from_millis(150)).await;
         }

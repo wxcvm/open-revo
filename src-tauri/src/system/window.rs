@@ -320,10 +320,51 @@ pub fn switch_to_mini_drawer(app: &tauri::AppHandle) {
 
 /// Look up the main window without creating it (e.g. when rendering the tray menu).
 pub fn ensure_window_alive(app: &tauri::AppHandle) -> Option<WebviewWindow> {
-    app.get_webview_window("main")
+    app.get_webview_window("main").filter(native_window_alive)
+}
+
+#[cfg(windows)]
+fn native_window_alive(window: &WebviewWindow) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow};
+    let Ok(hwnd) = window.hwnd() else { return false; };
+    let hwnd = HWND(hwnd.0 as _);
+    let mut owner = 0;
+    unsafe {
+        IsWindow(hwnd).as_bool()
+            && GetWindowThreadProcessId(hwnd, Some(&mut owner)) != 0
+            && owner == std::process::id()
+    }
+}
+
+#[cfg(not(windows))]
+fn native_window_alive(window: &WebviewWindow) -> bool {
+    window.is_visible().is_ok()
 }
 
 static REBUILDING_MAIN: AtomicBool = AtomicBool::new(false);
+static RECOVERY_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+const RECOVERY_ENV: &str = "OPENREVO_WINDOW_RECOVERY";
+
+/// Explicit recovery takes precedence over the parent's preserved --minimized flag.
+pub(crate) fn consume_window_recovery() -> bool {
+    let requested = std::env::var(RECOVERY_ENV).as_deref() == Ok("1");
+    if requested {
+        std::env::remove_var(RECOVERY_ENV);
+        RECOVERY_ATTEMPTED.store(true, Ordering::Release);
+    }
+    requested
+}
+
+fn restart_for_missing_window(app: &AppHandle, reason: &str) {
+    if RECOVERY_ATTEMPTED.swap(true, Ordering::AcqRel) {
+        crate::system::boot_trace::boot_log("UI_REPAIR", &format!("{reason}; automatic restart already tried"));
+        return;
+    }
+    crate::system::boot_trace::boot_log("UI_REPAIR", &format!("{reason}; restarting once to reopen the main window"));
+    std::env::set_var(RECOVERY_ENV, "1");
+    app.request_restart();
+}
 
 /// A tray icon can outlive its main WebView. User-facing entry points must be able
 /// to rebuild the missing window, not silently treat a running process as a UI.
@@ -350,20 +391,38 @@ pub fn request_main_window(app: &AppHandle, mode: MainWindowMode) {
             restore_main(&window, mode);
             return;
         }
-        crate::system::boot_trace::boot_log("UI_REPAIR", "Main window missing; recreating on user request");
+        if let Some(stale) = app.get_webview_window("main") {
+            crate::system::boot_trace::boot_log("UI_REPAIR", "Main window registration has no live native HWND");
+            let _ = stale.destroy();
+            // The Windows runtime normally removes the registration on its
+            // Destroyed event. A stale HWND may never deliver that event.
+            for _ in 0..20 {
+                if app.get_webview_window("main").is_none() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if app.get_webview_window("main").is_some() {
+                restart_for_missing_window(&app, "Stale main window registration could not be released");
+                return;
+            }
+        }
+        crate::system::boot_trace::boot_log("UI_OPEN", "Creating main WebView on explicit request");
         let result = (|| -> Result<WebviewWindow, String> {
+            let _creation = crate::system::webview_orchestrator::WEBVIEW_CREATION.blocking_lock();
             let config = app.config().app.windows.iter().find(|config| config.label == "main")
                 .ok_or_else(|| "Missing main window configuration".to_string())?;
             WebviewWindowBuilder::from_config(&app, config)
                 .and_then(|builder| builder.build()).map_err(|error| error.to_string())
         })();
         match result {
-            Ok(window) => {
+            Ok(window) if native_window_alive(&window) => {
                 init_main_window(&window);
                 restore_main(&window, mode);
-                crate::system::boot_trace::boot_log("UI_REPAIR", "Main window recreated; waiting for frontend handshake");
+                crate::system::boot_trace::boot_log("UI_OPEN", "Main window created; waiting for frontend handshake");
             }
-            Err(error) => crate::system::boot_trace::boot_log("UI_REPAIR", &format!("Main window recreation failed: {error}")),
+            Ok(_) => restart_for_missing_window(&app, "Created main window has no live native HWND"),
+            Err(error) => restart_for_missing_window(&app, &format!("Main window creation failed: {error}")),
         }
     });
 }
@@ -540,5 +599,14 @@ mod tests {
         assert!(should_show_on_launch(["open-revo.exe", "--minimized", "--show"], false));
         assert!(should_show_on_launch(["open-revo.exe", "--visible", "--minimized"], false));
         assert!(should_show_on_launch(["open-revo.exe", "--minimized"], true));
+    }
+
+    #[test]
+    fn main_window_configuration_is_lazy() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let main = config["app"]["windows"].as_array().unwrap().iter()
+            .find(|window| window["label"] == "main").unwrap();
+        assert_eq!(main["create"], false);
+        assert_eq!(main["visible"], false);
     }
 }

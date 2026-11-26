@@ -70,6 +70,7 @@ impl openrevo_core::CoreEventSink for TauriEventSink {
 }
 
 pub fn run() {
+    let recover_to_foreground = crate::system::window::consume_window_recovery();
     // 0. Disable WebView2 background throttling & renderer suspension for HUD overlay and widgets
     #[cfg(windows)]
     {
@@ -400,6 +401,7 @@ pub fn run() {
             commands::watcher_cmd::trigger_watcher_manual,
         ])
         .setup(move |app| {
+            crate::system::boot_trace::open_primary_boot_log();
             match app.path().app_local_data_dir() {
                 Ok(dir) => crate::system::resources::start(dir.join("resource-history-v1")),
                 Err(error) => crate::log_warn!("RESOURCES", "Resource history directory unavailable: {error}"),
@@ -408,15 +410,6 @@ pub fn run() {
             crate::system::boot_trace::boot_log("SETUP", "Tauri setup closure entered");
             crate::system::actuator::UnifiedPowerActuator::global().bind_app_handle(app.handle().clone());
             crate::system::webview_orchestrator::WebviewOrchestrator::global().bind_app_handle(app.handle().clone());
-
-            // Step 6.1: Initialize main WebviewWindow (positioning above taskbar)
-            crate::system::boot_trace::boot_scope("Step 6.1: Main Window Positioning", || {
-                if let Some(window) = app.get_webview_window("main") {
-                    crate::system::window::init_main_window(&window);
-                } else {
-                    crate::log_error!("WINDOW", "CRITICAL: 'main' WebviewWindow was NOT created by Tauri during setup!");
-                }
-            });
 
             // Step 6.2: Initialize permanent keyboard hook (Caps Lock, Num Lock, Scroll Lock, Win Lock)
             crate::system::boot_trace::boot_scope("Step 6.2: Keyboard Hooks", || {
@@ -498,11 +491,14 @@ pub fn run() {
         .on_window_event(crate::system::window::handle_window_event)
         .build(tauri::generate_context!())
         .expect("error while building OpenRevo application")
-        .run(|app_handle, event| {
+        .run(move |app_handle, event| {
             if let tauri::RunEvent::Ready = &event {
                 let configured = crate::system::config::load_config().launch_visible;
-                if crate::system::window::should_show_on_launch(std::env::args().skip(1), configured) {
+                if recover_to_foreground || crate::system::window::should_show_on_launch(std::env::args().skip(1), configured) {
                     crate::system::window::request_main_window(app_handle, crate::system::window::MainWindowMode::Preferred);
+                } else {
+                    crate::system::boot_trace::boot_log("UI_DEFER", "Tray startup: main WebView deferred until explicitly opened");
+                    crate::system::webview_orchestrator::WebviewOrchestrator::global().allow_secondary_windows();
                 }
             }
             #[cfg(windows)]

@@ -7,7 +7,12 @@ use std::time::Instant;
 use parking_lot::Mutex;
 
 static BOOT_START_INSTANT: OnceLock<Instant> = OnceLock::new();
-static BOOT_LOG_FILE: LazyLock<Mutex<Option<File>>> = LazyLock::new(|| Mutex::new(None));
+#[derive(Default)]
+struct BootTrace {
+    pending: String,
+    file: Option<File>,
+}
+static BOOT_TRACE: LazyLock<Mutex<BootTrace>> = LazyLock::new(|| Mutex::new(BootTrace::default()));
 static BOOT_COMPLETED: AtomicBool = AtomicBool::new(false);
 
 pub fn get_boot_log_path() -> PathBuf {
@@ -15,28 +20,19 @@ pub fn get_boot_log_path() -> PathBuf {
 }
 
 /// Initialize the Boot Trace system at the very beginning of main().
-/// Cleans previous boot.log and starts the high-precision millisecond stopwatch.
+/// Buffer early milestones until Tauri has admitted this instance as primary.
 pub fn init_boot_trace() {
     let start = Instant::now();
     let _ = BOOT_START_INSTANT.set(start);
 
-    let path = get_boot_log_path();
-    let file_res = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)
-        .or_else(|_| OpenOptions::new().create(true).append(true).open(&path));
+    let now_str = chrono_or_fallback_now();
+    let args: Vec<String> = std::env::args().collect();
+    let pid = std::process::id();
+    let current_exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
-    if let Ok(mut f) = file_res {
-        let now_str = chrono_or_fallback_now();
-        let args: Vec<String> = std::env::args().collect();
-        let pid = std::process::id();
-        let current_exe = std::env::current_exe()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        let header = format!(
+    BOOT_TRACE.lock().pending = format!(
             "================================================================================\n\
              OpenRevo Boot Trace Log (Dedicated Startup Diagnostics)\n\
              Boot Time: {}\n\
@@ -45,13 +41,27 @@ pub fn init_boot_trace() {
              Arguments: {:?}\n\
              ================================================================================\n",
             now_str, current_exe, pid, args
-        );
-        let _ = f.write_all(header.as_bytes());
-        let _ = f.flush();
-        *BOOT_LOG_FILE.lock() = Some(f);
-    }
+    );
 
     boot_log("INIT", &format!("Boot stopwatch initialized (PID: {})", std::process::id()));
+}
+
+/// Only Tauri's primary setup reaches this call. Secondary tray invocations
+/// must not truncate the boot log while the original process still writes it.
+pub fn open_primary_boot_log() {
+    let mut state = BOOT_TRACE.lock();
+    if state.file.is_some() {
+        return;
+    }
+    match OpenOptions::new().create(true).write(true).truncate(true).open(get_boot_log_path()) {
+        Ok(mut file) => {
+            let _ = file.write_all(state.pending.as_bytes());
+            let _ = file.flush();
+            state.pending.clear();
+            state.file = Some(file);
+        }
+        Err(error) => eprintln!("[BOOT] Unable to open primary boot trace: {error}"),
+    }
 }
 
 fn chrono_or_fallback_now() -> String {
@@ -77,17 +87,12 @@ pub fn boot_log(tag: &str, message: &str) {
     crate::log_info!("BOOT", "[{}] {}", tag, message);
 
     // 3. Persist unconditionally to boot.log
-    let mut guard = BOOT_LOG_FILE.lock();
-    if let Some(ref mut f) = *guard {
+    let mut state = BOOT_TRACE.lock();
+    if let Some(ref mut f) = state.file {
         let _ = f.write_all(line.as_bytes());
         let _ = f.flush();
-    } else {
-        // Fallback open if init was bypassed
-        let path = get_boot_log_path();
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
-            let _ = f.write_all(line.as_bytes());
-            let _ = f.flush();
-        }
+    } else if state.pending.len() + line.len() <= 64 * 1024 {
+        state.pending.push_str(&line);
     }
 }
 
@@ -101,12 +106,12 @@ pub fn boot_scope<T, F: FnOnce() -> T>(step_name: &str, f: F) -> T {
     res
 }
 
-/// Record that Tauri backend setup finished and main WebviewWindow was spawned.
+/// Record backend/tray setup, which can finish without a main WebView.
 pub fn record_stage0_ui_ready() {
     let total = BOOT_START_INSTANT.get().map(|s| s.elapsed().as_millis()).unwrap_or(0);
     boot_log(
         "STAGE0_OK",
-        &format!("Stage 0 UI Ready: Main WebviewWindow positioned and spawned (+{}ms). Awaiting frontend DOM handshake...", total),
+        &format!("Backend and tray ready (+{}ms). The main WebView handshakes after it is opened.", total),
     );
 }
 
