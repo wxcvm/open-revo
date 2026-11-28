@@ -4024,6 +4024,13 @@ body,
 .manager-hero p, .manager-heading p { margin: 0; }
 .manager-hero small, .manager-hero p, .manager-heading small { color: var(--text-muted); }
 .manager-badge { padding: 6px 10px; border: 1px solid var(--border-medium); border-radius: var(--radius-full); color: var(--text-secondary); font-size: 12px; }
+.manager-hero-actions { display: grid; justify-items: start; gap: 6px; max-width: 395px; }
+.manager-hero-actions .manager-error { margin: 0; }
+.manager-quick > p { color: var(--text-muted); }
+.manager-quick-card h4 { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; }
+.manager-quick-card small { display: block; color: var(--text-muted); margin-block-start: 7px; }
+.manager-quick-level { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.manager-quick-level input { max-inline-size: 110px; accent-color: var(--color-brand); }
 .manager-nav { display: flex; flex-wrap: wrap; gap: 7px; padding-block: 10px; border-bottom: 1px solid var(--border-medium); }
 .manager-nav button, .manager-shell .toggle-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: normal; }
 .manager-content { flex: 1; overflow: auto; min-height: 0; min-width: 0; padding-block: 15px 28px; }

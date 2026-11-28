@@ -1,4 +1,11 @@
 //! Windows overlay API shared by native scenes and legacy power linkage.
+use windows::{
+    core::{s, w},
+    Win32::{
+        Foundation::{HANDLE, HMODULE},
+        System::LibraryLoader::{GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32},
+    },
+};
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct GUID {
@@ -31,21 +38,29 @@ pub const GUID_TURBO_PERF: GUID = GUID {
     data4: [0x87, 0x37, 0x46, 0x34, 0x5c, 0x09, 0xc2, 0x38],
 };
 
-#[link(name = "kernel32")]
-extern "system" {
-    fn LoadLibraryA(lp_lib_filename: *const u8) -> *mut std::ffi::c_void;
-    fn GetProcAddress(h_module: *mut std::ffi::c_void, lp_proc_name: *const u8) -> *mut std::ffi::c_void;
-}
-
 type FnPowerSetActiveOverlayScheme = unsafe extern "system" fn(*const GUID) -> u32;
-static POWER_LIBRARY: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| unsafe { LoadLibraryA(b"powrprof.dll\0".as_ptr()) as usize });
+static POWER_LIBRARY: std::sync::LazyLock<Option<usize>> = std::sync::LazyLock::new(|| unsafe {
+    LoadLibraryExW(
+        w!("powrprof.dll"),
+        HANDLE::default(),
+        LOAD_LIBRARY_SEARCH_SYSTEM32,
+    )
+    .ok()
+    .map(|module| module.0 as usize)
+});
+
+fn power_library() -> Option<HMODULE> {
+    (*POWER_LIBRARY).map(|module| HMODULE(module as *mut std::ffi::c_void))
+}
 
 pub(crate) fn set_active_overlay_scheme(guid_ptr: *const GUID) -> u32 {
     unsafe {
-        let module = *POWER_LIBRARY as *mut std::ffi::c_void;
-        if module.is_null() { return 1; }
-        let function = GetProcAddress(module, b"PowerSetActiveOverlayScheme\0".as_ptr());
-        if function.is_null() { return 2; }
+        let Some(module) = power_library() else {
+            return 1;
+        };
+        let Some(function) = GetProcAddress(module, s!("PowerSetActiveOverlayScheme")) else {
+            return 2;
+        };
         let function: FnPowerSetActiveOverlayScheme = std::mem::transmute(function);
         function(guid_ptr)
     }
@@ -53,18 +68,18 @@ pub(crate) fn set_active_overlay_scheme(guid_ptr: *const GUID) -> u32 {
 
 pub(crate) fn get_actual_overlay_scheme() -> Result<GUID, String> {
     unsafe {
-        let module = *POWER_LIBRARY as *mut std::ffi::c_void;
-        if module.is_null() { return Err("Windows power library unavailable".into()); }
-        let function = GetProcAddress(module, b"PowerGetActualOverlayScheme\0".as_ptr());
-        if function.is_null() { return Err("Windows energy readback unavailable".into()); }
+        let module = power_library().ok_or("Windows power library unavailable")?;
+        let function = GetProcAddress(module, s!("PowerGetActualOverlayScheme"))
+            .ok_or("Windows energy readback unavailable")?;
         let function: unsafe extern "system" fn(*mut GUID) -> u32 = std::mem::transmute(function);
         let mut guid = GUID_BALANCED;
         let result = function(&mut guid);
-        if result != 0 { return Err(format!("Windows energy readback: {result}")); }
+        if result != 0 {
+            return Err(format!("Windows energy readback: {result}"));
+        }
         Ok(guid)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -76,5 +91,10 @@ mod tests {
     }
     #[test]
     #[ignore = "Read-only local Windows energy acceptance"]
-    fn live_energy_read() { println!("WINDOWS_ENERGY={:?}", super::get_actual_overlay_scheme().unwrap()); }
+    fn live_energy_read() {
+        println!(
+            "WINDOWS_ENERGY={:?}",
+            super::get_actual_overlay_scheme().unwrap()
+        );
+    }
 }

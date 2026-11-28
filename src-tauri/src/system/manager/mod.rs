@@ -1,6 +1,8 @@
 //! On-demand Windows maintenance. The manager has its own WebView, never loads extension HTML,
 //! and accepts only server-owned scan/preview item identifiers for writes.
+pub(crate) mod handoff;
 mod inventory;
+mod quick_controls;
 mod startup;
 mod storage;
 mod volume_overview;
@@ -97,6 +99,43 @@ pub(crate) fn manager_session(
     Ok(super::desktop_session::Session {
         hardware: session.hardware,
     })
+}
+
+#[tauri::command]
+pub(crate) async fn manager_hardware_panel(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+    session: tauri::State<'_, super::desktop_session::Session>,
+) -> Result<(), String> {
+    let owner = authorize(&window, true)?;
+    if session.hardware {
+        super::window::request_main_window(&app, super::window::MainWindowMode::Preferred);
+        return Ok(());
+    }
+    blocking(move || handoff::launch(owner)).await?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn manager_quick_controls(
+    window: WebviewWindow,
+    session: tauri::State<'_, super::desktop_session::Session>,
+) -> Result<quick_controls::Snapshot, String> {
+    authorize(&window, true)?;
+    let hardware = session.hardware;
+    blocking(move || quick_controls::read(hardware)).await
+}
+
+#[tauri::command]
+pub(crate) async fn manager_set_quick_control(
+    window: WebviewWindow,
+    session: tauri::State<'_, super::desktop_session::Session>,
+    action: quick_controls::Action,
+) -> Result<quick_controls::Snapshot, String> {
+    authorize(&window, true)?;
+    let hardware = session.hardware;
+    blocking(move || quick_controls::apply(action, hardware)).await
 }
 
 pub(crate) async fn show(app: &tauri::AppHandle) -> Result<(), String> {

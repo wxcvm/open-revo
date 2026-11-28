@@ -32,6 +32,13 @@ export type VolumeOverview = {
   current: VolumeSample; previous: VolumeSample | null; save_available: boolean; saved: boolean; notice: string | null;
 };
 export type Session = { hardware: boolean };
+export type PowerMode = 'efficiency' | 'balanced' | 'performance';
+export type Playback = { device: string; volume: number; muted: boolean };
+type ControlReading<T> = { value: T | null; problem: string | null };
+export type ControlSnapshot = { audio: ControlReading<Playback>; power: ControlReading<PowerMode> };
+export type ControlAction = { kind: 'volume'; device: string; expected: number; level: number }
+  | { kind: 'mute'; device: string; expected: boolean; muted: boolean }
+  | { kind: 'energy'; expected: PowerMode; mode: PowerMode };
 export type AwakeState = { enabled: boolean; remaining_ms: number | null };
 export type Section = 'tree' | 'largest' | 'duplicates' | 'cleanup';
 export type ScanRow = {
@@ -57,6 +64,9 @@ export type ShellPage = 'apps' | 'startup' | 'storage' | 'update' | 'security' |
 
 export const manager = {
   session: () => invoke<Session>('manager_session'),
+  hardwarePanel: () => invoke<void>('manager_hardware_panel'),
+  quickControls: () => invoke<ControlSnapshot>('manager_quick_controls'),
+  setQuickControl: (action: ControlAction) => invoke<ControlSnapshot>('manager_set_quick_control', { action }),
   awakeStatus: () => invoke<AwakeState>('get_background_awake_status'),
   setAwake: (enable: boolean, minutes?: number) => invoke<boolean>('set_background_awake', { enable, minutes }),
   saveVolume: (id: number) => invoke<Scan>('manager_save_volume_snapshot', { id }),

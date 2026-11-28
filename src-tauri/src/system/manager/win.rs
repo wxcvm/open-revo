@@ -73,9 +73,9 @@ impl Drop for Handle {
         }
     }
 }
-struct Apartment;
+pub(super) struct Apartment;
 impl Apartment {
-    fn new() -> Outcome<Self> {
+    pub(super) fn new() -> Outcome<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_APARTMENTTHREADED)
                 .ok()
@@ -529,7 +529,7 @@ pub(super) fn confirm(owner: usize, title: &str, message: &str) -> bool {
     }
 }
 
-fn creation(h: HANDLE) -> Outcome<u64> {
+pub(super) fn creation(h: HANDLE) -> Outcome<u64> {
     let (mut stamp, mut exit, mut k, mut u) = (
         FILETIME::default(),
         FILETIME::default(),

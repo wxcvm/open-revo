@@ -27,6 +27,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const previous = { ...current, captured_ms: time - 3600000,
         totals: { ...current.totals, free: 46 * gib, used: 82 * gib }, unresolved: 4 * gib };
       let target, saved = false, awake = false;
+      let volumeLevel = 39, muted = false, power = 'balanced';
+      const quick = () => ({ audio: { value: { device: 'fixture-speaker', volume: volumeLevel, muted }, problem: null },
+        power: { value: power, problem: null } });
       let disabled = false, polls = 0, cancel = false, pending;
       window.calls = [];
       const status = (kind, state) => ({ id: kind === 'cleanup' ? 45 : 43, kind, state,
@@ -41,6 +44,15 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         window.calls.push([cmd, args]);
         switch (cmd) {
           case 'manager_session': return { hardware: false };
+          case 'manager_hardware_panel': throw '已取消 Windows 管理员确认，管理中心保持打开。';
+          case 'manager_quick_controls': return quick();
+          case 'manager_set_quick_control': {
+            const action = args.action;
+            if (action.kind === 'volume') volumeLevel = action.level - 1; // Driver readback can differ.
+            if (action.kind === 'mute') muted = action.muted;
+            if (action.kind === 'energy') power = action.mode;
+            return quick();
+          }
           case 'get_background_awake_status': return { enabled: awake, remaining_ms: awake ? 30 * 60000 : null };
           case 'set_background_awake': awake = args.enable; return awake;
           case 'manager_health': return { time_ms: time, memory: { visible: 32 * 2 ** 30, available: 7 * 2 ** 30, load: 78 },
@@ -91,6 +103,24 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const b = (name, parent = p) => parent.getByRole('button', { name, exact: typeof name === 'string' });
     const tab = name => b(name, p.getByRole('navigation', { name: '管理中心导航' })).click();
     await p.getByText(/标准权限管理模式/).waitFor();
+    assert.equal(await p.evaluate(() => window.calls.some(([c]) => c === 'manager_set_quick_control' || c === 'manager_hardware_panel')), false);
+    await b('打开硬件面板').click();
+    await p.getByText('已取消 Windows 管理员确认，管理中心保持打开。').waitFor();
+    assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_hardware_panel').length), 1);
+    const controls = p.getByRole('region', { name: '本机快捷控制' });
+    await controls.getByRole('slider', { name: '输出音量' }).fill('51');
+    await b('应用音量', controls).click();
+    await controls.getByText(/Windows 回读音量：50%/).waitFor();
+    await b('静音', controls).click();
+    await b('取消静音', controls).waitFor();
+    await controls.getByLabel('Windows 能源模式').selectOption('efficiency');
+    await b('应用能源模式', controls).click();
+    await controls.getByText(/Windows 回读能源模式：最佳能效/).waitFor();
+    assert.deepEqual(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_set_quick_control').map(([,args]) => args.action)),
+      [{ kind: 'volume', device: 'fixture-speaker', expected: 39, level: 51 },
+        { kind: 'mute', device: 'fixture-speaker', expected: false, muted: true },
+        { kind: 'energy', expected: 'balanced', mode: 'efficiency' }]);
+    assert.equal(await p.evaluate(() => window.calls.some(([c]) => c === 'manager_shell')), false);
     await b('开启保活').click();
     await b('停止保活').waitFor();
     assert.deepEqual(await p.evaluate(() => window.calls.find(([c]) => c === 'set_background_awake')[1]), { enable: true, minutes: 30 });
@@ -105,6 +135,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_apply').length), 0);
     await tab('存储与清理');
     await b('选择目录并扫描').click();
+    assert.equal(await b('打开硬件面板').isDisabled(), true);
     await b('取消扫描').click();
     await p.getByText(/已取消；以下不作为完整统计/).waitFor();
     await b('扫描选中卷').click();

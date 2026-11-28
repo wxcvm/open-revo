@@ -74,7 +74,17 @@ pub fn run() {
     let (mode, background) = desktop_session::entry();
     match mode {
         Mode::Management => desktop_session::run(background),
-        Mode::Hardware if crate::system::manager::verify_interactive_account().is_ok() => run_hardware(),
+        Mode::Hardware => {
+            use crate::system::manager;
+            let launch = manager::verify_interactive_account().and_then(|()| {
+                manager::handoff::wait_for_parent(&std::env::args_os().skip(1).collect::<Vec<_>>())
+            });
+            if let Err(error) = launch {
+                crate::log_warn!("HARDWARE", "Hardware session not started: {error}");
+                return;
+            }
+            run_hardware();
+        }
         // An old logon task may still exist. Never run hardware initialization
         // for an elevated background token, an unverified token, or another account.
         _ => (),
@@ -122,6 +132,9 @@ fn run_hardware() {
             commands::sysinfo_cmd::get_system_stats,
             crate::system::manager::open_pc_manager,
             crate::system::manager::manager_session,
+            crate::system::manager::manager_hardware_panel,
+            crate::system::manager::manager_quick_controls,
+            crate::system::manager::manager_set_quick_control,
             crate::system::manager::manager_health,
             crate::system::manager::manager_inventory,
             crate::system::manager::manager_startup,

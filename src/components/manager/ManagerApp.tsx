@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, AppWindow, ClipboardList, Gauge, HardDrive, History, ListStart, ShieldCheck } from 'lucide-react';
+import { Activity, AppWindow, ClipboardList, Cpu, Gauge, HardDrive, History, ListStart, ShieldCheck } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { ResourceOverview } from '../monitor/ResourceOverview';
 import { bytes, bps, percent } from '../monitor/ResourceChart';
 import type { Minute } from '../monitor/ResourceChart';
 import { StorageView } from './StorageView';
+import { QuickControls } from './QuickControls';
 import { dateTime, manager, textError } from './api';
-import type { AwakeState, Action, AppInfo, Health, Peak, Preview, Receipt, Scan, ShellPage, Startup, UpdateInfo, WindowsEvent, WindowsInventory } from './api';
+import type { AwakeState, Action, AppInfo, Health, Peak, Preview, Receipt, Scan, Session, ShellPage, Startup, UpdateInfo, WindowsEvent, WindowsInventory } from './api';
 
 const NAV = [
   { id: 'health', title: '电脑体检', icon: ShieldCheck },
@@ -263,8 +264,7 @@ function Receipts({ generation, open }: { generation: number; open: (p: ShellPag
 }
 
 
-function SessionControls({ open }: { open: (p: ShellPage) => void }) {
-  const session = useRead(manager.session);
+function SessionControls({ session }: { session: Query<Session> }) {
   const awake = useRead(manager.awakeStatus);
   const [readback, setReadback] = useState<AwakeState>();
   const [duration, setDuration] = useState(30);
@@ -291,9 +291,8 @@ function SessionControls({ open }: { open: (p: ShellPage) => void }) {
   return <section className="resource-panel" aria-label="会话权限与后台保活">
     <div className="resource-line">
       <h3>会话权限与后台保活</h3>
-      <button className="toggle-btn" onClick={() => open('startup')}>打开 Windows 启动项</button>
     </div>
-    {session.data?.hardware === false && <p>标准权限管理模式：未加载驱动、固件控制、插件或硬件配置。硬件调校需先退出此会话，再从 Windows 以管理员身份手动启动。</p>}
+    {session.data?.hardware === false && <p>标准权限管理模式：未加载驱动或固件控制；硬件入口在窗口顶部。</p>}
     {session.data?.hardware === true && <p>管理员硬件会话：仅手动启动，应用不登记或重建登录自启任务。</p>}
     <div className="resource-actions">
       <label>熄屏保活 <select aria-label="熄屏保活时长" value={duration} disabled={busy} onChange={e => setDuration(Number(e.target.value))}>
@@ -319,8 +318,23 @@ export function ManagerApp() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [openingHardware, setOpeningHardware] = useState(false);
+  const [hardwareError, setHardwareError] = useState('');
+  const session = useRead(manager.session);
   const health = useRead(manager.health, healthGeneration);
   const intent = useRef(false);
+  const handoff = useRef(false);
+  const scanActive = job?.state === 'running' || job?.state === 'canceling';
+
+  const openHardware = async () => {
+    if (!session.data || handoff.current || (!session.data.hardware && (scanActive || preview || busy))) return;
+    handoff.current = true;
+    setOpeningHardware(true);
+    setHardwareError('');
+    try { await manager.hardwarePanel(); }
+    catch (cause) { setHardwareError(textError(cause)); }
+    finally { handoff.current = false; setOpeningHardware(false); }
+  };
 
   const open = (p: ShellPage) => { setError(''); void manager.shell(p).catch(e => setError(textError(e))); };
   const prepare = async (action: Action) => {
@@ -359,7 +373,15 @@ export function ManagerApp() {
   return <div className="manager-shell">
     <header className="manager-hero">
       <div><small>OPENREVO · {__APP_VERSION__}</small><h1>管理中心</h1><p>系统体检、空间分析与可核对的维护</p></div>
-      <span className="manager-badge">本机处理 · 按需执行</span>
+      <section className="manager-hero-actions" aria-label="硬件面板入口">
+        <button type="button" className="toggle-btn active-indigo"
+          disabled={!session.data || openingHardware || (!session.data.hardware && (scanActive || !!preview || busy))}
+          onClick={() => void openHardware()}><Cpu size={17} /> {openingHardware ? '等待 Windows 确认…' :
+            session.data?.hardware ? '返回硬件面板' : '打开硬件面板'}</button>
+        {session.data?.hardware === false && <small>{scanActive || preview || busy ? '先完成或取消本次维护' :
+          '风扇、充电、CPU／GPU · Windows 会请求管理员确认；切换结束本次保活'}</small>}
+        {(hardwareError || session.error) && <small className="manager-error" role="alert">{hardwareError || session.error}</small>}
+      </section>
     </header>
     <nav aria-label="管理中心导航" className="manager-nav">{NAV.map(({ id, title, icon: Icon }) =>
       <button key={id} aria-current={page === id ? 'page' : undefined} type="button" className={'toggle-btn ' + (page === id ? 'active-indigo' : '')}
@@ -370,7 +392,8 @@ export function ManagerApp() {
       {notice && <p className="manager-notice" role="status">{notice}</p>}
       {last && page !== 'receipts' && <ReceiptView receipt={last} compact />}
       {page === 'health' && <><div className="manager-top-action"><button className="toggle-btn" disabled={health.loading}
-        onClick={() => setHealthGeneration(n => n + 1)}>刷新体检</button></div><HealthView health={health} open={open} navigate={navigate} /><SessionControls open={open} /></>}
+        onClick={() => setHealthGeneration(n => n + 1)}>刷新体检</button></div>
+        <div className="manager-stack"><QuickControls /><HealthView health={health} open={open} navigate={navigate} /><SessionControls session={session} /></div></>}
       {page === 'storage' && <StorageView volumes={health.data?.volumes ?? []} job={job} setJob={setJob} open={open} preview={a => void prepare(a)} />}
       {page === 'resources' && <ResourceOverview onCloseProcess={process => void prepare({ kind: 'close', process })} />}
       {page === 'startup' && <StartupView open={open} generation={version} preview={a => void prepare(a)} />}

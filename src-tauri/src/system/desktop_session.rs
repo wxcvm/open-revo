@@ -121,6 +121,9 @@ pub(crate) fn run(background: bool) {
         }))
         .invoke_handler(tauri::generate_handler![
             manager::manager_session,
+            manager::manager_hardware_panel,
+            manager::manager_quick_controls,
+            manager::manager_set_quick_control,
             manager::manager_health,
             manager::manager_inventory,
             manager::manager_startup,
