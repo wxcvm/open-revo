@@ -409,6 +409,27 @@ fn git_short_hash() -> String {
     }
 }
 
+fn watch_git_version() {
+    println!("cargo:rerun-if-env-changed=VITE_GIT_COMMIT");
+    // Git resolves the correct metadata locations for both ordinary checkouts
+    // and linked worktrees. The branch directory also covers packed-to-loose refs.
+    for key in ["HEAD", "refs/heads", "packed-refs"] {
+        if let Ok(result) = std::process::Command::new("git")
+            .args(["rev-parse", "--path-format=absolute", "--git-path", key])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+        {
+            if result.status.success() {
+                let path = String::from_utf8_lossy(&result.stdout);
+                let path = path.trim();
+                if std::path::Path::new(path).exists() {
+                    println!("cargo:rerun-if-changed={path}");
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     // Tauri's resource manifest is attached to the app binary, not the lib
     // unit-test executable. rfd also imports TaskDialogIndirect there, so the
@@ -425,6 +446,7 @@ fn main() {
     }
     generate_hardware_vault();
 
+    watch_git_version();
     let git_hash = git_short_hash();
     if !git_hash.is_empty() {
         println!("cargo:rustc-env=OPENREVO_GIT_COMMIT={git_hash}");

@@ -188,6 +188,11 @@
           border-color: rgba(255, 255, 255, 0.15);
         }
 
+        .m-btn-action:disabled {
+          opacity: .45;
+          cursor: not-allowed;
+        }
+
         /* 刷新率四等分按钮 (30px) */
         .m-btn-hz {
           height: 30px;

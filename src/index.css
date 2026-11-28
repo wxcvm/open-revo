@@ -583,6 +583,26 @@ button {
   margin-top: 12px;
 }
 
+.awake-switch-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.awake-switch-wrap select {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 4px;
+  color: var(--text-secondary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.awake-switch-wrap select:disabled { opacity: .65; }
+
 .oem-switch-card {
   position: relative;
   background: linear-gradient(180deg, rgba(8, 22, 48, 0.75) 0%, rgba(5, 14, 32, 0.88) 100%);

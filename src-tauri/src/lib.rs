@@ -269,6 +269,7 @@ pub fn run() {
             commands::hardware_cmd::save_app_config,
             commands::hardware_cmd::get_device_switches,
             crate::system::background_awake::get_background_awake,
+            crate::system::background_awake::get_background_awake_status,
             crate::system::background_awake::set_background_awake,
             commands::hardware_cmd::set_device_switch,
             commands::hardware_cmd::get_gpu_mode_info,

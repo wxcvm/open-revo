@@ -4,8 +4,8 @@
 use parking_lot::Mutex;
 use std::sync::{Arc, OnceLock};
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter,
 };
 
@@ -75,10 +75,12 @@ pub fn update_tray_fan_boost(enabled: bool) {
     }
 }
 
-pub(crate) fn update_background_awake(enabled: bool, failed: bool) {
+pub(crate) fn update_background_awake(enabled: bool, timed: bool, failed: bool) {
     if let Some(ctrl) = TRAY_MENU_CONTROLS.get() {
         let _ = ctrl.background_awake.set_checked(enabled);
-        let label = if failed { "后台保活（Windows 请求失败）" } else { "后台保活（允许熄屏）" };
+        let label = if failed { "后台保活（Windows 请求失败）" }
+            else if timed { "后台保活（定时中）" }
+            else { "后台保活（允许熄屏）" };
         let _ = ctrl.background_awake.set_text(label);
     }
 }
@@ -117,6 +119,10 @@ pub fn build_tray_menu(
     let background_awake_item = CheckMenuItem::with_id(
         app, "background_awake", "后台保活（允许熄屏）", true, crate::system::background_awake::active(), None::<&str>,
     )?;
+    let awake_30 = MenuItem::with_id(app, "background_awake_30", "30 分钟", true, None::<&str>)?;
+    let awake_120 = MenuItem::with_id(app, "background_awake_120", "2 小时", true, None::<&str>)?;
+    let awake_480 = MenuItem::with_id(app, "background_awake_480", "8 小时", true, None::<&str>)?;
+    let timed_awake = Submenu::with_items(app, "定时保活", true, &[&awake_30, &awake_120, &awake_480])?;
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     let initial_mode = ec.lock().get_power_mode();
@@ -154,6 +160,7 @@ pub fn build_tray_menu(
             &full_panel_item,
             &mini_drawer_item,
             &background_awake_item,
+            &timed_awake,
             &turn_off_screen_item,
             &sep1,
             &office_item,
@@ -178,6 +185,9 @@ pub fn handle_tray_menu_event(
 ) {
     match event_id {
         "background_awake" => crate::system::background_awake::toggle_from_tray(app_handle),
+        "background_awake_30" => crate::system::background_awake::start_timed_from_tray(app_handle, 30),
+        "background_awake_120" => crate::system::background_awake::start_timed_from_tray(app_handle, 120),
+        "background_awake_480" => crate::system::background_awake::start_timed_from_tray(app_handle, 480),
         "mode_full_panel" => {
             crate::log_info!("TRAY", "Menu 'mode_full_panel' (完整面板) clicked");
             crate::system::window::switch_to_full_panel(app_handle);
@@ -321,10 +331,12 @@ pub fn handle_tray_icon_event(tray: &TrayIcon, event: TrayIconEvent) {
     match event {
         TrayIconEvent::Click {
             button: MouseButton::Left,
+            button_state: MouseButtonState::Down,
             ..
-        }
-        | TrayIconEvent::DoubleClick {
+        } => crate::system::window::mark_window_woken(),
+        TrayIconEvent::Click {
             button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
             ..
         } => {
             crate::system::window::request_main_window(tray.app_handle(), crate::system::window::MainWindowMode::Preferred);

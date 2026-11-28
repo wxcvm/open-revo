@@ -3,12 +3,22 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { MoonStar } from 'lucide-react';
 
+type AwakeStatus = { enabled: boolean; remaining_ms: number | null };
+
 export function BackgroundAwakeSwitch() {
   const [active, setActive] = useState<boolean | null>(null);
+  const [minutes, setMinutes] = useState(0);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [seconds, setSeconds] = useState(0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const inFlight = useRef(false);
   const revision = useRef(0);
+  const applyStatus = ({ enabled, remaining_ms }: AwakeStatus) => {
+    setActive(enabled);
+    setDeadline(enabled && remaining_ms != null ? performance.now() + remaining_ms : null);
+    setSeconds(enabled && remaining_ms != null ? Math.ceil(remaining_ms / 1000) : 0);
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -16,19 +26,19 @@ export function BackgroundAwakeSwitch() {
     const read = async () => {
       const seen = revision.current;
       try {
-        const enabled = await invoke<boolean>('get_background_awake');
+        const status = await invoke<AwakeStatus>('get_background_awake_status');
         if (!disposed && seen === revision.current) {
-          setActive(enabled);
+          applyStatus(status);
           setError('');
         }
       } catch {
         if (!disposed && seen === revision.current) setError('未能读取后台保活状态');
       }
     };
-    void listen<boolean>('background-awake-state-changed', ({ payload }) => {
+    void listen<AwakeStatus>('background-awake-status-changed', ({ payload }) => {
       if (!disposed) {
         revision.current++;
-        setActive(payload);
+        applyStatus(payload);
       }
     }).then((fn) => {
       if (disposed) fn();
@@ -43,6 +53,14 @@ export function BackgroundAwakeSwitch() {
     };
   }, []);
 
+  useEffect(() => {
+    if (deadline === null) return;
+    const timer = window.setInterval(() => {
+      setSeconds(Math.max(0, Math.ceil((deadline - performance.now()) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+
   const toggle = async () => {
     if (inFlight.current || active === null) return;
     inFlight.current = true;
@@ -50,8 +68,9 @@ export function BackgroundAwakeSwitch() {
     setPending(true);
     setError('');
     try {
-      const enabled = await invoke<boolean>('set_background_awake', { enable: !active });
-      if (seen === revision.current) setActive(enabled);
+      await invoke<boolean>('set_background_awake', { enable: !active, minutes: !active && minutes > 0 ? minutes : null });
+      const status = await invoke<AwakeStatus>('get_background_awake_status');
+      if (seen === revision.current) applyStatus(status);
     } catch (cause) {
       setError(typeof cause === 'string' ? cause : 'Windows 未接受后台保活请求');
     } finally {
@@ -60,7 +79,10 @@ export function BackgroundAwakeSwitch() {
     }
   };
 
+  const countdown = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+    .map(part => String(part).padStart(2, '0')).join(':');
   return (
+    <div className="awake-switch-wrap">
     <button
       type="button"
       className={`oem-switch-card ${active ? 'active' : ''}`}
@@ -74,7 +96,17 @@ export function BackgroundAwakeSwitch() {
       <span className="oem-bracket-bl" /><span className="oem-bracket-br" />
       <span className="oem-icon-badge"><MoonStar className="w-4 h-4" /></span>
       <span className="oem-switch-title">后台保活</span>
-      <small>{error ? <span role="alert">{error}</span> : pending ? '正在请求…' : active ? '已请求 · 可熄屏' : active === null ? '读取中…' : '防空闲睡眠 · 可熄屏'}</small>
+      <small>{error ? <span role="alert">{error}</span> : pending ? '正在请求…'
+        : active ? (deadline === null ? '已请求 · 可熄屏' : countdown)
+        : active === null ? '读取中…' : '防空闲睡眠 · 可熄屏'}</small>
     </button>
+    <select aria-label="后台保活时长" value={minutes} disabled={pending || active !== false}
+      onChange={event => setMinutes(Number(event.target.value))}>
+      <option value={0}>手动关闭</option>
+      <option value={30}>30 分钟</option>
+      <option value={120}>2 小时</option>
+      <option value={480}>8 小时</option>
+    </select>
+    </div>
   );
 }

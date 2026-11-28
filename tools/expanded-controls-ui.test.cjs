@@ -38,11 +38,15 @@ import React from '/node_modules/.vite/deps/react.js';
 import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
 import { CpuPolicyPanel } from '/src/components/tuning/CpuPolicyPanel.tsx';
 import { NativeChargePanel } from '/src/components/tuning/NativeChargePanel.tsx';
+import { DrawerGpuModeCard } from '/src/components/drawer/DrawerGpuModeCard.tsx';
 import AmdDriverGraphicsPanel from '/src/components/gpu/AmdDriverGraphicsPanel.tsx';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 const gpuPanel = () => React.createElement(AmdDriverGraphicsPanel);
 window.mountCharge = () => root.render(React.createElement(NativeChargePanel));
 window.mountCpu = () => root.render(React.createElement(CpuPolicyPanel));
+window.mountDrawerGpu = () => root.render(React.createElement(DrawerGpuModeCard, {
+  status: { gpu_temp: 0, cpu_temp: 65, gpu_fan_rpm: 0 }, onExpandDashboard: tab => { window.lastTab = tab; }
+}));
 window.mountGpu = strict => root.render(strict
   ? React.createElement(React.StrictMode, null, gpuPanel())
   : gpuPanel());
@@ -91,6 +95,7 @@ window.unmount = () => root.render(null);
         async invoke(name, args) {
           const f = window.fixture;
           f.calls.push(name);
+          if (name === 'get_gpu_mode_info') return f.drawerGpu ?? null;
           if (name === 'get_native_charge_state') {
             if (f.chargeReadFail) throw new Error('readback offline');
             return structuredClone(f.charge);
@@ -388,6 +393,28 @@ window.unmount = () => root.render(null);
     await page.waitForTimeout(200);
     assert.equal(await page.getByRole('group', {name:'电池充电上限'}).count(),0);
     console.log('PASS charge: unsupported machine has no controls');
+    await page.evaluate(() => window.mountDrawerGpu());
+    await page.getByText('检测中...', {exact:true}).waitFor();
+    const gpuButtons = page.locator('.m-grid-3 button');
+    assert.equal(await gpuButtons.locator('xpath=self::button[@disabled]').count(), 3);
+    assert.match(await page.locator('.m-header-right').innerText(), /GPU: -- · Fan: --/);
+    await page.evaluate(() => {
+      window.fixture.drawerGpu = {has_dgpu: true, current_mode: 'hybrid',
+        capabilities: { supports_igpu_only: false, supports_hybrid: true, supports_dgpu: true }};
+      window.dispatchEvent(new Event('focus'));
+    });
+    const locked = page.getByRole('button', {name:'双模锁定'});
+    await locked.waitFor();
+    assert.equal(await locked.isDisabled(), true);
+    assert.equal(await page.getByRole('button', {name:'标准混合'}).isDisabled(), false);
+    await page.evaluate(() => {
+      window.fixture.drawerGpu = {has_dgpu: false, current_mode: 'igpu'};
+      window.dispatchEvent(new Event('focus'));
+    });
+    await page.getByRole('button', {name:'纯集显 (生效)'}).click();
+    assert.equal(await page.evaluate(() => window.lastTab), 'gpu');
+    assert.equal(await page.getByRole('button', {name:'独显直连'}).isDisabled(), true);
+    console.log('PASS mini GPU: loading is unavailable, dual-output iGPU lock, native iGPU display access, no fake sensor values');
     assert.deepEqual(errors, []);
     console.log('PASS gpu unknown readback: no on/off claim, toggle unusable, draft empty, restore unavailable');
   } finally {

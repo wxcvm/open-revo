@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { HardwareState } from '../../types/hardware';
-import { Cpu, Repeat, Crosshair } from 'lucide-react';
+import { Cpu, Repeat, Crosshair, Lock } from 'lucide-react';
+import type { GpuCapabilities } from '../GpuModeView';
 
 interface DrawerGpuModeCardProps {
   status: HardwareState;
@@ -19,30 +20,45 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
     has_dgpu: boolean;
     has_igpu_present: boolean;
     gpu_name: string;
+    capabilities?: GpuCapabilities;
   } | null>(null);
 
   useEffect(() => {
+    let disposed = false;
+    let latest = 0;
     const fetchGpuMode = () => {
-      invoke<any>('get_gpu_mode_info')
+      const request = ++latest;
+      invoke<typeof gpuModeInfo>('get_gpu_mode_info')
         .then((res) => {
-          if (res) setGpuModeInfo(res);
+          if (!disposed && request === latest) setGpuModeInfo(res);
         })
-        .catch(() => {});
+        .catch(() => { if (!disposed && request === latest) setGpuModeInfo(null); });
     };
 
     fetchGpuMode();
     window.addEventListener('focus', fetchGpuMode);
 
     let unlistenGpu: (() => void) | undefined;
-    listen<any>('gpu-mode-changed', (e) => {
-      if (e.payload) setGpuModeInfo(e.payload);
-    }).then((fn) => { unlistenGpu = fn; });
+    listen('gpu-mode-changed', fetchGpuMode).then((fn) => {
+      if (disposed) fn(); else unlistenGpu = fn;
+    }).catch(() => {});
 
     return () => {
+      disposed = true;
       window.removeEventListener('focus', fetchGpuMode);
       if (unlistenGpu) unlistenGpu();
     };
   }, []);
+
+  // Match the native MUX capability, never treat an absent read as permission.
+  const nativeIgpu = gpuModeInfo?.has_dgpu === false;
+  const caps = gpuModeInfo?.capabilities;
+  const supportsIgpu = nativeIgpu || (gpuModeInfo?.has_dgpu === true && caps?.supports_igpu_only === true);
+  const supportsHybrid = gpuModeInfo?.has_dgpu === true && caps?.supports_hybrid === true;
+  const supportsDgpu = gpuModeInfo?.has_dgpu === true && caps?.supports_dgpu === true;
+  const igpuLocked = gpuModeInfo?.has_dgpu === true && caps?.supports_igpu_only === false;
+  const gpuTemp = Number.isFinite(status.gpu_temp) && status.gpu_temp > 0 ? `${status.gpu_temp}°C` : '--';
+  const fan = Number.isFinite(status.gpu_fan_rpm) && status.gpu_fan_rpm > 0 ? `${status.gpu_fan_rpm} RPM` : '--';
 
   return (
     <div className="m-card">
@@ -63,13 +79,14 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
           </span>
         </div>
         <div className="m-header-right" style={{ color: 'var(--theme-gpu)' }}>
-          GPU: {status.gpu_temp > 0 ? `${status.gpu_temp}°C` : (status.cpu_temp > 0 ? `${status.cpu_temp}°C` : '--')} · Fan: {status.gpu_fan_rpm > 0 ? `${status.gpu_fan_rpm} RPM` : '静音'}
+          GPU: {gpuTemp} · Fan: {fan}
         </div>
       </div>
 
       <div className="m-grid-3">
         <button
           className="m-btn-action"
+          disabled={!supportsIgpu}
           style={{
             ...(gpuModeInfo?.current_mode === 'igpu' || gpuModeInfo?.has_dgpu === false
               ? {
@@ -80,18 +97,20 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
                 }
               : {}),
           }}
-          title={gpuModeInfo?.has_dgpu === false ? '纯核显轻薄本架构，原生运行于核显模式' : '点击打开高级显卡切换面板'}
+          title={nativeIgpu ? '纯核显机型，打开显示设置' : igpuLocked
+            ? (caps?.reason_igpu_unsupported || '双模机型，未提供纯集显直连')
+            : supportsIgpu ? '打开显卡模式面板' : '尚未确认纯集显能力'}
           onClick={() => onExpandDashboard('gpu')}
         >
-          <Cpu size={14} />
+          {igpuLocked ? <Lock size={14} /> : <Cpu size={14} />}
           <span style={{ fontSize: '10.5px', fontWeight: 600 }}>
-            {gpuModeInfo?.has_dgpu === false ? '纯集显 (生效)' : '纯集显'}
+            {nativeIgpu ? '纯集显 (生效)' : igpuLocked ? '双模锁定' : '纯集显'}
           </span>
         </button>
 
         <button
           className="m-btn-action"
-          disabled={gpuModeInfo?.has_dgpu === false}
+          disabled={!supportsHybrid}
           style={{
             ...(gpuModeInfo?.current_mode === 'hybrid' && gpuModeInfo?.has_dgpu !== false
               ? {
@@ -105,7 +124,7 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
               ? { opacity: 0.35, cursor: 'not-allowed' }
               : {}),
           }}
-          title={gpuModeInfo?.has_dgpu === false ? '纯核显架构无独立显卡，不可用' : '点击打开高级显卡切换面板'}
+          title={supportsHybrid ? '打开显卡模式面板' : '未确认混合输出可用'}
           onClick={() => {
             if (gpuModeInfo?.has_dgpu !== false) onExpandDashboard('gpu');
           }}
@@ -116,7 +135,7 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
 
         <button
           className="m-btn-action"
-          disabled={gpuModeInfo?.has_dgpu === false}
+          disabled={!supportsDgpu}
           style={{
             ...(gpuModeInfo?.current_mode === 'dgpu' && gpuModeInfo?.has_dgpu !== false
               ? {
@@ -130,7 +149,7 @@ export const DrawerGpuModeCard: React.FC<DrawerGpuModeCardProps> = ({
               ? { opacity: 0.35, cursor: 'not-allowed' }
               : {}),
           }}
-          title={gpuModeInfo?.has_dgpu === false ? '纯核显架构无独立显卡，不可用' : '点击打开高级显卡切换面板'}
+          title={supportsDgpu ? '打开显卡模式面板' : '未确认独显直连可用'}
           onClick={() => {
             if (gpuModeInfo?.has_dgpu !== false) onExpandDashboard('gpu');
           }}
