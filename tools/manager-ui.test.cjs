@@ -20,16 +20,29 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       const drive = { root: 'D:\\', total: 128 * 2 ** 30, free: 40 * 2 ** 30 };
       const row = { id: 17, path: 'D:\\scratch\\Fixture.tmp', category: 'fixture', logical: 2048000,
         allocated: 2097152, count: 1, group: null };
+      const gib = 2 ** 30;
+      const current = { captured_ms: time, totals: { total: 128 * gib, free: 36 * gib, used: 88 * gib, reserved: 4 * gib, pool_unavailable: 0 },
+        classified: [35, 20, 15, 2, 6].map(n => n * gib), unresolved: 10 * gib,
+        recycle: { bytes: 1111, items: 7 }, skipped: 1, unknown_allocation: 1 };
+      const previous = { ...current, captured_ms: time - 3600000,
+        totals: { ...current.totals, free: 46 * gib, used: 82 * gib }, unresolved: 4 * gib };
+      let target, saved = false, awake = false;
       let disabled = false, polls = 0, cancel = false, pending;
       window.calls = [];
       const status = (kind, state) => ({ id: kind === 'cleanup' ? 45 : 43, kind, state,
         scope: kind === 'cleanup' ? '当前用户' : 'D:\\scratch', volume: drive, total: [1, 1, 2, 1], notes: [],
+        duplicates_requested: !!target?.verify_duplicates,
+        overview: target?.kind === 'volume' && state === 'partial' ?
+          { current, previous, save_available: true, saved, notice: null } : null,
         progress: { files: 82, skipped: 1, logical: 2048000, allocated: 2097152 },
         stats: { logical: 2048000, allocated: 2097152, aliases: 2, unknown_allocation: 1 },
       });
       window.__TAURI_INTERNALS__ = { invoke: async (cmd, args) => {
         window.calls.push([cmd, args]);
         switch (cmd) {
+          case 'manager_session': return { hardware: false };
+          case 'get_background_awake_status': return { enabled: awake, remaining_ms: awake ? 30 * 60000 : null };
+          case 'set_background_awake': awake = args.enable; return awake;
           case 'manager_health': return { time_ms: time, memory: { visible: 32 * 2 ** 30, available: 7 * 2 ** 30, load: 78 },
             antivirus: 'good', firewall: 'unavailable', volumes: [drive] };
           case 'manager_inventory':
@@ -41,7 +54,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
             state: disabled ? 'backup' : 'registered', action: disabled ? 'restore' : 'disable' }], warnings: [] };
           case 'manager_peaks': return [{ time_ms: time - 1, metric: 'cpu', value: 53 }];
           case 'get_resource_history': return [];
-          case 'manager_scan': polls = 0; cancel = false; return status(args.target.kind === 'cleanup' ? 'cleanup' : 'space', 'running');
+          case 'manager_scan': target = args.target; saved = false; polls = 0; cancel = false; return status(args.target.kind === 'cleanup' ? 'cleanup' : 'space', 'running');
+          case 'manager_save_volume_snapshot': saved = true; return status('space', 'partial');
           case 'manager_scan_cancel': cancel = true; return;
           case 'manager_scan_status': return args.id === 45 ? status('cleanup', 'complete') : status('space', cancel ? 'canceled' : ++polls >= 2 ? 'partial' : 'running');
           case 'manager_scan_page': return args.section === 'duplicates' ?
@@ -76,6 +90,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await p.evaluate(() => window.calls.some(([c]) => c === 'manager_scan')), false);
     const b = (name, parent = p) => parent.getByRole('button', { name, exact: typeof name === 'string' });
     const tab = name => b(name, p.getByRole('navigation', { name: '管理中心导航' })).click();
+    await p.getByText(/标准权限管理模式/).waitFor();
+    await b('开启保活').click();
+    await b('停止保活').waitFor();
+    assert.deepEqual(await p.evaluate(() => window.calls.find(([c]) => c === 'set_background_awake')[1]), { enable: true, minutes: 30 });
+    await b('停止保活').click();
+    await b('开启保活').waitFor();
     await tab('资源去向');
     await p.getByText(/≥ 1(?:\.0)? KiB/).waitFor();
     await b(/Fixture.exe（2 个进程）/).click();
@@ -87,7 +107,21 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await b('选择目录并扫描').click();
     await b('取消扫描').click();
     await p.getByText(/已取消；以下不作为完整统计/).waitFor();
+    await b('扫描选中卷').click();
+    const volume = p.getByRole('region', { name: '整盘空间对账' });
+    await volume.getByRole('img', { name: '整盘已用空间分类图' }).waitFor();
+    await volume.getByText(/系统已用变化/).waitFor();
+    assert.match(await volume.locator('.manager-data-pills').innerText(), /\+6(?:\.0+)? GiB/);
+    assert.match(await volume.getByText(/卷容量余差\s*\+4/).innerText(), /GiB/);
+    assert.match(await volume.getByText(/系统报告的保留空间/).innerText(), /4(?:\.0+)? GiB/);
+    assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_save_volume_snapshot').length), 0);
+    assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_scan').at(-1)[1].target.verify_duplicates), false);
+    await b('保存本次卷快照', volume).click();
+    await b('本次快照已保存', volume).waitFor();
+    assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_save_volume_snapshot').length), 1);
+    await p.getByRole('checkbox', { name: '同时校验重复文件内容' }).check();
     await b('选择目录并扫描').click();
+    assert.equal(await p.evaluate(() => window.calls.filter(([c]) => c === 'manager_scan').at(-1)[1].target.verify_duplicates), true);
     await p.getByRole('img', { name: '文件夹占盘比例图' }).waitFor();
     await b('重复文件').click();
     await p.getByText('Duplicate.tmp', { exact: false }).first().waitFor();
@@ -120,7 +154,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await p.setViewportSize({ width: 430, height: 640 });
     assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(errors, []);
-    console.log('PASS management center: health, grouped telemetry, scan cancel/duplicates, confirmed cleanup, startup restore, inventory, timeline, receipts, narrow layout');
+    console.log('PASS management center: session permissions, awake readback, grouped telemetry, scan cancellation, volume delta/save, explicit hashing, maintenance and narrow layout');
   } finally {
     if (browser) await browser.close();
     await server.close();

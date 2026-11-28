@@ -1,4 +1,4 @@
-use super::win;
+use super::{volume_overview, win};
 use parking_lot::Mutex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -224,6 +224,7 @@ impl Row {
 }
 #[derive(Default)]
 struct ResultSet {
+    overview: Option<volume_overview::Overview>,
     stats: Stats,
     tree: Vec<Row>,
     largest: Vec<Row>,
@@ -245,6 +246,8 @@ pub(crate) struct Status {
     state: &'static str,
     scope: String,
     volume: Option<win::Volume>,
+    overview: Option<volume_overview::Overview>,
+    duplicates_requested: bool,
     progress: Progress,
     total: Vec<usize>,
     stats: Option<Stats>,
@@ -255,6 +258,7 @@ pub(crate) struct Status {
 pub(super) struct Job {
     pub id: u64,
     root: Option<PathBuf>,
+    verify_duplicates: bool,
     cancel: AtomicBool,
     files: AtomicU64,
     skipped: AtomicU64,
@@ -264,10 +268,11 @@ pub(super) struct Job {
     notes: Mutex<Vec<String>>,
 }
 impl Job {
-    fn new(root: Option<PathBuf>) -> Self {
+    fn new(root: Option<PathBuf>, verify_duplicates: bool) -> Self {
         Self {
             id: super::serial(),
             root,
+            verify_duplicates,
             cancel: false.into(),
             files: 0.into(),
             skipped: 0.into(),
@@ -314,6 +319,8 @@ impl Job {
                 |r| r.to_string_lossy().into_owned(),
             ),
             volume: self.root.as_ref().and_then(|root| win::volume(root).ok()),
+            overview: ok.and_then(|r| r.overview.clone()),
+            duplicates_requested: self.verify_duplicates,
             progress: Progress {
                 files: self.files.load(Ordering::Relaxed),
                 skipped: self.skipped.load(Ordering::Relaxed),
@@ -355,12 +362,12 @@ pub(super) fn cancel(id: Option<u64>) -> win::Outcome<()> {
     }
     Ok(())
 }
-pub(super) fn start(root: Option<PathBuf>) -> win::Outcome<Status> {
+pub(super) fn start(root: Option<PathBuf>, verify_duplicates: bool) -> win::Outcome<Status> {
     let mut s = slot().lock();
     if s.as_ref().is_some_and(|j| j.result.lock().is_none()) {
         return Err("已有扫描，请等待或先取消".into());
     }
-    let job = Arc::new(Job::new(root));
+    let job = Arc::new(Job::new(root, verify_duplicates));
     let worker = job.clone();
     std::thread::Builder::new()
         .name("openrevo-storage-scan".into())
@@ -374,6 +381,22 @@ pub(super) fn start(root: Option<PathBuf>) -> win::Outcome<Status> {
 }
 pub(super) fn status(id: u64) -> win::Outcome<Status> {
     Ok(get(id)?.status())
+}
+pub(super) fn save_volume_snapshot(id: u64) -> win::Outcome<Status> {
+    let job = get(id)?;
+    {
+        let mut result = job.result.lock();
+        if job.halted() {
+            return Err("已取消的扫描不写入卷快照。".into());
+        }
+        let overview = result
+            .as_mut()
+            .and_then(|r| r.as_mut().ok())
+            .and_then(|r| r.overview.as_mut())
+            .ok_or("仅已完成的整卷扫描可保存卷快照。")?;
+        volume_overview::save(overview)?;
+    }
+    Ok(job.status())
 }
 pub(super) fn page(id: u64, section: &str, offset: usize) -> win::Outcome<Vec<Row>> {
     let job = get(id)?;
@@ -447,6 +470,7 @@ struct Scanner<'a> {
     dups: HashMap<u64, Vec<FileEntry>>,
     dup_count: usize,
     output: ResultSet,
+    volume: Option<volume_overview::Accounting>,
 }
 
 impl<'a> Scanner<'a> {
@@ -460,9 +484,11 @@ impl<'a> Scanner<'a> {
             dups: HashMap::new(),
             dup_count: 0,
             output: ResultSet::default(),
+            volume: None,
         };
         if let Some(root) = &job.root {
             let root = win::checked_path(root)?;
+            s.volume = volume_overview::Accounting::new(&root);
             s.walk(&root, None, None, 0);
         } else {
             for rule in rules(job)? {
@@ -609,6 +635,9 @@ impl<'a> Scanner<'a> {
             }
             return;
         }
+        if let Some(volume) = self.volume.as_mut() {
+            volume.add(path, links, allocated);
+        }
         if self.bins.len() < GROUP_LIMIT || self.bins.contains_key(bucket) {
             let b = self.bins.entry(bucket.to_path_buf()).or_default();
             b.seen += 1;
@@ -633,7 +662,7 @@ impl<'a> Scanner<'a> {
                 self.top.pop_first();
             }
         }
-        if stamp.len >= 1024 * 1024 {
+        if self.job.verify_duplicates && stamp.len >= 1024 * 1024 {
             if self.dup_count < DUP_CANDIDATES {
                 self.dup_count += 1;
                 self.dups.entry(stamp.len).or_default().push((
@@ -714,6 +743,14 @@ impl<'a> Scanner<'a> {
         self.output
             .cleanup
             .sort_by_key(|p| std::cmp::Reverse(p.0.allocated.unwrap_or(p.0.logical)));
+        if !self.job.halted() {
+            if let Some(volume) = self.volume.take() {
+                self.output.overview = Some(volume.finish(
+                    self.output.stats.skipped,
+                    self.output.stats.unknown_allocation,
+                ));
+            }
+        }
         Ok(self.output)
     }
 }
@@ -764,7 +801,7 @@ mod tests {
         fs::hard_link(&a, root.join("alias")).unwrap();
         fs::write(root.join("same"), vec![17; 1024 * 1024]).unwrap();
         fs::write(root.join("different"), vec![29; 1024 * 1024]).unwrap();
-        let r = Scanner::run(&Job::new(Some(root.clone()))).unwrap();
+        let r = Scanner::run(&Job::new(Some(root.clone()), true)).unwrap();
         assert_eq!(
             (r.stats.files, r.stats.aliases, r.duplicates.len()),
             (3, 1, 2)
@@ -777,7 +814,7 @@ mod tests {
     #[test]
     fn canceled_scan_and_pure_browser_profile_scope() {
         let root = make_dir();
-        let job = Job::new(Some(root.clone()));
+        let job = Job::new(Some(root.clone()), true);
         job.cancel.store(true, Ordering::Relaxed);
         assert_eq!(Scanner::run(&job).unwrap().stats.files, 0);
         assert!(browser_profile(std::ffi::OsStr::new("Profile 42")));

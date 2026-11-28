@@ -6,7 +6,7 @@ import { bytes, bps, percent } from '../monitor/ResourceChart';
 import type { Minute } from '../monitor/ResourceChart';
 import { StorageView } from './StorageView';
 import { dateTime, manager, textError } from './api';
-import type { Action, AppInfo, Health, Peak, Preview, Receipt, Scan, ShellPage, Startup, UpdateInfo, WindowsEvent, WindowsInventory } from './api';
+import type { AwakeState, Action, AppInfo, Health, Peak, Preview, Receipt, Scan, ShellPage, Startup, UpdateInfo, WindowsEvent, WindowsInventory } from './api';
 
 const NAV = [
   { id: 'health', title: '电脑体检', icon: ShieldCheck },
@@ -262,6 +262,53 @@ function Receipts({ generation, open }: { generation: number; open: (p: ShellPag
   </section>;
 }
 
+
+function SessionControls({ open }: { open: (p: ShellPage) => void }) {
+  const session = useRead(manager.session);
+  const awake = useRead(manager.awakeStatus);
+  const [readback, setReadback] = useState<AwakeState>();
+  const [duration, setDuration] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const current = readback ?? awake.data;
+  useEffect(() => {
+    if (!current?.enabled) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void manager.awakeStatus().then(value => { if (active) setReadback(value); }).catch(() => {});
+    }, 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [current?.enabled]);
+  const setAwake = async (enable: boolean) => {
+    setBusy(true); setError('');
+    try {
+      await manager.setAwake(enable, enable && duration ? duration : undefined);
+      setReadback(await manager.awakeStatus());
+    } catch (cause) {
+      setError(textError(cause));
+    } finally { setBusy(false); }
+  };
+  return <section className="resource-panel" aria-label="会话权限与后台保活">
+    <div className="resource-line">
+      <h3>会话权限与后台保活</h3>
+      <button className="toggle-btn" onClick={() => open('startup')}>打开 Windows 启动项</button>
+    </div>
+    {session.data?.hardware === false && <p>标准权限管理模式：未加载驱动、固件控制、插件或硬件配置。硬件调校需先退出此会话，再从 Windows 以管理员身份手动启动。</p>}
+    {session.data?.hardware === true && <p>管理员硬件会话：仅手动启动，应用不登记或重建登录自启任务。</p>}
+    <div className="resource-actions">
+      <label>熄屏保活 <select aria-label="熄屏保活时长" value={duration} disabled={busy} onChange={e => setDuration(Number(e.target.value))}>
+        <option value="30">30 分钟</option><option value="120">2 小时</option><option value="480">8 小时</option><option value="0">直到关闭</option>
+      </select></label>
+      <button className="toggle-btn" disabled={busy || !current} onClick={() => void setAwake(!current?.enabled)}>
+        {current?.enabled ? '停止保活' : '开启保活'}
+      </button>
+      {current && <span role="status">{current.enabled ? current.remaining_ms == null ? '已开启 · 本次会话' :
+        '已开启 · 约剩 ' + Math.ceil(current.remaining_ms / 60000) + ' 分钟' : '保活未开启'}</span>}
+    </div>
+    <p>允许屏幕熄灭，只申请阻止系统空闲睡眠；主动睡眠或退出结束本次请求。</p>
+    {error && <p className="manager-error" role="alert">{error}</p>}
+  </section>;
+}
 export function ManagerApp() {
   const [page, setPage] = useState<Page>('health');
   const [version, setVersion] = useState(0);
@@ -323,7 +370,7 @@ export function ManagerApp() {
       {notice && <p className="manager-notice" role="status">{notice}</p>}
       {last && page !== 'receipts' && <ReceiptView receipt={last} compact />}
       {page === 'health' && <><div className="manager-top-action"><button className="toggle-btn" disabled={health.loading}
-        onClick={() => setHealthGeneration(n => n + 1)}>刷新体检</button></div><HealthView health={health} open={open} navigate={navigate} /></>}
+        onClick={() => setHealthGeneration(n => n + 1)}>刷新体检</button></div><HealthView health={health} open={open} navigate={navigate} /><SessionControls open={open} /></>}
       {page === 'storage' && <StorageView volumes={health.data?.volumes ?? []} job={job} setJob={setJob} open={open} preview={a => void prepare(a)} />}
       {page === 'resources' && <ResourceOverview onCloseProcess={process => void prepare({ kind: 'close', process })} />}
       {page === 'startup' && <StartupView open={open} generation={version} preview={a => void prepare(a)} />}

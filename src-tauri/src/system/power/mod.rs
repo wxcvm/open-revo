@@ -186,8 +186,6 @@ pub fn spawn_hardware_state_restore(ec_for_restore: crate::driver::ec_bridge::Sh
                 "MAIN",
                 "Vendor controls selected or OEM service active. PASSIVE SAFEGUARD ACTIVATED: suppressing startup hardware writes, display refresh rate, and lighting streamer."
             );
-            // Safe maintenance only: task scheduler sync & self-heal
-            crate::system::autostart::sync_autostart_target_path();
             return;
         }
 
@@ -419,8 +417,6 @@ pub fn spawn_hardware_state_restore(ec_for_restore: crate::driver::ec_bridge::Sh
             let _ = crate::system::switches::radio::set_native_bluetooth_radio_state(false);
             crate::log_info!("POWER_RESTORE", "Startup restored Bluetooth state: disabled");
         }
-        // Auto-heal Task Scheduler startup task to guarantee current executable path alignment & 2-second delay buffer
-        crate::system::autostart::sync_autostart_target_path();
         // Restore user preferred Windows Power Scheme if explicitly configured
         if let Some(ref target_guid) = cfg.preferred_power_scheme {
             if let Err(e) = ppm::set_active_windows_power_scheme(target_guid) {

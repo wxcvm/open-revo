@@ -334,7 +334,6 @@ export default function App() {
             battery_limit: cfg.battery_limit,
             win_key_locked: cfg.win_key_locked,
             refresh_rate: cfg.refresh_rate,
-            autostart: cfg.autostart,
           }));
           if (cfg.wake_window_mode === 'full') {
             setIsExpanded(true);
@@ -673,16 +672,12 @@ export default function App() {
     }
   };
 
-  // Autostart checkbox toggle
-  const handleToggleAutostart = async () => {
-    const nextVal = !hardwareState.autostart;
-    setHardwareState((prev) => ({ ...prev, autostart: nextVal }));
+  const handleOpenStartupSettings = async () => {
     if (isTauriEnv) {
       try {
-        const res = await invoke<boolean>('set_autostart_enabled', { enabled: nextVal });
-        setHardwareState((prev) => ({ ...prev, autostart: res }));
-      } catch (e) {
-        console.error('Failed to toggle autostart:', e);
+        await invoke('open_startup_settings');
+      } catch (error) {
+        window.alert(String(error));
       }
     }
   };
@@ -793,7 +788,7 @@ export default function App() {
           onToggleBatteryLimit={handleToggleBatteryLimit}
           onSwitchRefreshRate={handleSwitchRefreshRate}
           onToggleWinKey={handleToggleWinKey}
-          onToggleAutostart={handleToggleAutostart}
+          onOpenStartupSettings={handleOpenStartupSettings}
           onToggleOemService={handleToggleOemService}
           onCollapseDashboard={handleCollapseDashboard}
           onMinimize={handleMinimize}
@@ -815,7 +810,7 @@ export default function App() {
           onToggleBatteryLimit={handleToggleBatteryLimit}
           onSwitchRefreshRate={handleSwitchRefreshRate}
           onToggleWinKey={handleToggleWinKey}
-          onToggleAutostart={handleToggleAutostart}
+          onOpenStartupSettings={handleOpenStartupSettings}
           onToggleOemService={handleToggleOemService}
           onExpandDashboard={handleExpandDashboard}
           onOpenSponsor={handleOpenSponsor}

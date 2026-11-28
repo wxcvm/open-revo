@@ -170,7 +170,6 @@ pub fn collect_hardware_state(
     let oem_running = process::is_oem_service_running();
     let oem_installed = process::is_oem_installed();
     let is_intel_13_14_gen = cpu.is_intel_13_14_gen();
-    let autostart_enabled = autostart::is_autostart_enabled();
 
     let cfg = crate::system::config::load_config();
     let support_flags = crate::driver::wmi_ec::get_hardware_support_flags();
@@ -211,7 +210,7 @@ pub fn collect_hardware_state(
         oem_running,
         oem_installed,
         vendor_bus_selected: cfg.use_vendor_bus && !cfg.takeover_oem,
-        autostart: autostart_enabled,
+        autostart: false, // Legacy telemetry field; Windows registration is not app-managed.
         is_intel_13_14_gen,
         water_cooler_enabled: crate::system::config::is_water_cooler_enabled(),
         support_flags,
@@ -289,14 +288,8 @@ pub fn set_unlock_battery_power_limit(
 }
 
 #[tauri::command]
-pub fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
-    let res = autostart::set_autostart_enabled(enabled);
-    if let Ok(val) = res {
-        let mut cfg = crate::system::config::load_config();
-        cfg.autostart = val;
-        crate::system::config::save_config(&cfg);
-    }
-    res
+pub fn open_startup_settings(window: tauri::WebviewWindow) -> Result<(), String> {
+    autostart::open_settings(&window)
 }
 
 #[tauri::command]
@@ -444,10 +437,6 @@ pub fn set_log_level(level: u8) -> LogStatus {
         crate::system::logger::set_log_level(level);
     }
     crate::system::config::save_config(&cfg);
-
-    if autostart::is_autostart_enabled() {
-        let _ = autostart::set_autostart_enabled(true);
-    }
 
     get_log_status()
 }

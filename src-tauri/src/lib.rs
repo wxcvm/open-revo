@@ -70,6 +70,18 @@ impl openrevo_core::CoreEventSink for TauriEventSink {
 }
 
 pub fn run() {
+    use crate::system::desktop_session::{self, Mode};
+    let (mode, background) = desktop_session::entry();
+    match mode {
+        Mode::Management => desktop_session::run(background),
+        Mode::Hardware if crate::system::manager::verify_interactive_account().is_ok() => run_hardware(),
+        // An old logon task may still exist. Never run hardware initialization
+        // for an elevated background token, an unverified token, or another account.
+        _ => (),
+    }
+}
+
+fn run_hardware() {
     let recover_to_foreground = crate::system::window::consume_window_recovery();
     // 0. Disable WebView2 background throttling & renderer suspension for HUD overlay and widgets
     #[cfg(windows)]
@@ -92,62 +104,6 @@ pub fn run() {
     crate::system::boot_trace::boot_log("BOOT_START", "OpenRevo engine starting up...");
     crate::system::logger::init_from_cli();
 
-    // Asynchronously warm up in-memory hardware capability snapshot cache & VBIOS power limits (zero disk persistence)
-    std::thread::spawn(|| {
-        if crate::hal::platform_probe::is_ultrabook() {
-            crate::log_info!("MAIN", "[Hardware Probe] Ultrabook detected: skipping gaming dGPU limits & EC power preset probe.");
-            return;
-        }
-        crate::log_info!("MAIN", "[Hardware Probe] Warming up in-memory hardware capability snapshot cache...");
-        let _ = crate::system::hardware_probe::get_hardware_snapshot_cached();
-        let _ = crate::driver::gpu_bridge::query_nvidia_power_limits_static();
-        let _ = crate::system::power_mode::refresh_factory_power_presets(true);
-    });
-
-    // Step 1: Ensure ACPI kernel driver & OEM static capability registry
-    crate::system::boot_trace::boot_scope("Step 1: ACPI Driver Readiness", || {
-        if !crate::hal::platform_probe::needs_acpi_kernel_driver() {
-            crate::system::boot_trace::boot_log("DRIVER_OK", "Platform uses native WMI/driverless mailbox channel. Bypassing UWACPIDriver.sys.");
-        } else if crate::driver::wmi_ec::is_acpi_driver_available() {
-            crate::system::boot_trace::boot_log("DRIVER_OK", "ACPI Driver (\\\\.\\ACPIDriver) is active and accessible (0ms fast path)");
-            let _ = crate::system::service_mgr::ensure_acpi_driver_ready();
-        } else {
-            crate::system::boot_trace::boot_log("DRIVER_WARN", "ACPI Driver unavailable. Executing PnP self-healing (UWACPIDriver.sys)...");
-            crate::log_warn!("MAIN", "ACPI Driver unavailable on startup. Executing PnP self-healing synchronously to restore physical driver...");
-            let _ = crate::system::service_mgr::ensure_acpi_driver_ready();
-        }
-    });
-
-    // Step 2: Initialize EC driver bridge
-    let ec_instance: SharedEcBridge = crate::system::boot_trace::boot_scope("Step 2: EcBridge Auto-load", || {
-        Arc::new(Mutex::new(EcBridge::auto_load()))
-    });
-
-    // Step 3: Initialize GPU telemetry bridge
-    let gpu_instance: SharedGpuBridge = crate::system::boot_trace::boot_scope("Step 3: GpuBridge Telemetry", || {
-        crate::driver::gpu_bridge::get_global_gpu()
-    });
-
-    // Step 4: Initialize ITE lighting manager
-    let lighting_instance: crate::driver::ite_lighting::SharedIteLightingManager =
-        crate::system::boot_trace::boot_scope("Step 4: IteLightingManager", || {
-            crate::driver::ite_lighting::get_global_lighting()
-        });
-
-    let ec_for_manage = Arc::clone(&ec_instance);
-    let ec_for_tray = Arc::clone(&ec_instance);
-    let ec_for_restore = Arc::clone(&ec_instance);
-    let ec_for_wmi = Arc::clone(&ec_instance);
-    let ec_for_watcher = Arc::clone(&ec_instance);
-    let ec_for_power_listener = Arc::clone(&ec_instance);
-    let ec_for_telemetry = Arc::clone(&ec_instance);
-    let gpu_for_telemetry = Arc::clone(&gpu_instance);
-
-    let autostart_plugin = tauri_plugin_autostart::init(
-        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-        Some(vec!["--minimized"]),
-    );
-
     let single_instance_plugin = crate::system::boot_trace::boot_scope("Step 5: SingleInstance Plugin", || {
         tauri_plugin_single_instance::init(|app, argv, _cwd| {
             crate::system::boot_trace::boot_log("SINGLE_INST", &format!("Another instance attempted launch with args: {:?}", argv));
@@ -158,16 +114,14 @@ pub fn run() {
     });
 
     tauri::Builder::default()
-        .manage(ec_for_manage)
-        .manage(gpu_instance)
-        .manage(lighting_instance)
-        .plugin(autostart_plugin)
+        .manage(crate::system::desktop_session::Session { hardware: true })
         .plugin(single_instance_plugin)
         .invoke_handler(tauri::generate_handler![
             commands::hardware_cmd::get_model_capabilities,
             commands::hardware_cmd::get_hardware_status,
             commands::sysinfo_cmd::get_system_stats,
             crate::system::manager::open_pc_manager,
+            crate::system::manager::manager_session,
             crate::system::manager::manager_health,
             crate::system::manager::manager_inventory,
             crate::system::manager::manager_startup,
@@ -176,6 +130,7 @@ pub fn run() {
             crate::system::manager::manager_scan_status,
             crate::system::manager::manager_scan_page,
             crate::system::manager::manager_scan_cancel,
+            crate::system::manager::manager_save_volume_snapshot,
             crate::system::manager::manager_reveal,
             crate::system::manager::manager_preview,
             crate::system::manager::manager_apply,
@@ -237,7 +192,7 @@ pub fn run() {
             commands::hardware_cmd::get_mini_auto_hide,
             commands::hardware_cmd::set_mini_auto_hide,
             commands::hardware_cmd::toggle_oem_service,
-            commands::hardware_cmd::set_autostart_enabled,
+            commands::hardware_cmd::open_startup_settings,
             commands::hardware_cmd::start_water_cooler,
             commands::hardware_cmd::get_water_cooler_status,
             commands::hardware_cmd::set_water_cooler_speed,
@@ -425,6 +380,61 @@ pub fn run() {
             }
             openrevo_core::set_global_event_sink(Arc::new(TauriEventSink::new(app.handle().clone())));
             crate::system::boot_trace::boot_log("SETUP", "Tauri setup closure entered");
+
+            // Asynchronously warm up in-memory hardware capability snapshot cache & VBIOS power limits (zero disk persistence)
+            std::thread::spawn(|| {
+                if crate::hal::platform_probe::is_ultrabook() {
+                    crate::log_info!("MAIN", "[Hardware Probe] Ultrabook detected: skipping gaming dGPU limits & EC power preset probe.");
+                    return;
+                }
+                crate::log_info!("MAIN", "[Hardware Probe] Warming up in-memory hardware capability snapshot cache...");
+                let _ = crate::system::hardware_probe::get_hardware_snapshot_cached();
+                let _ = crate::driver::gpu_bridge::query_nvidia_power_limits_static();
+                let _ = crate::system::power_mode::refresh_factory_power_presets(true);
+            });
+
+            // Step 1: Ensure ACPI kernel driver & OEM static capability registry
+            crate::system::boot_trace::boot_scope("Step 1: ACPI Driver Readiness", || {
+                if !crate::hal::platform_probe::needs_acpi_kernel_driver() {
+                    crate::system::boot_trace::boot_log("DRIVER_OK", "Platform uses native WMI/driverless mailbox channel. Bypassing UWACPIDriver.sys.");
+                } else if crate::driver::wmi_ec::is_acpi_driver_available() {
+                    crate::system::boot_trace::boot_log("DRIVER_OK", "ACPI Driver (\\\\.\\ACPIDriver) is active and accessible (0ms fast path)");
+                    let _ = crate::system::service_mgr::ensure_acpi_driver_ready();
+                } else {
+                    crate::system::boot_trace::boot_log("DRIVER_WARN", "ACPI Driver unavailable. Executing PnP self-healing (UWACPIDriver.sys)...");
+                    crate::log_warn!("MAIN", "ACPI Driver unavailable on startup. Executing PnP self-healing synchronously to restore physical driver...");
+                    let _ = crate::system::service_mgr::ensure_acpi_driver_ready();
+                }
+            });
+
+            // Step 2: Initialize EC driver bridge
+            let ec_instance: SharedEcBridge = crate::system::boot_trace::boot_scope("Step 2: EcBridge Auto-load", || {
+                Arc::new(Mutex::new(EcBridge::auto_load()))
+            });
+
+            // Step 3: Initialize GPU telemetry bridge
+            let gpu_instance: SharedGpuBridge = crate::system::boot_trace::boot_scope("Step 3: GpuBridge Telemetry", || {
+                crate::driver::gpu_bridge::get_global_gpu()
+            });
+
+            // Step 4: Initialize ITE lighting manager
+            let lighting_instance: crate::driver::ite_lighting::SharedIteLightingManager =
+                crate::system::boot_trace::boot_scope("Step 4: IteLightingManager", || {
+                    crate::driver::ite_lighting::get_global_lighting()
+                });
+
+            app.manage(Arc::clone(&ec_instance));
+            app.manage(Arc::clone(&gpu_instance));
+            app.manage(lighting_instance);
+
+            let ec_for_tray = Arc::clone(&ec_instance);
+            let ec_for_restore = Arc::clone(&ec_instance);
+            let ec_for_wmi = Arc::clone(&ec_instance);
+            let ec_for_watcher = Arc::clone(&ec_instance);
+            let ec_for_power_listener = Arc::clone(&ec_instance);
+            let ec_for_telemetry = Arc::clone(&ec_instance);
+            let gpu_for_telemetry = Arc::clone(&gpu_instance);
+
             crate::system::actuator::UnifiedPowerActuator::global().bind_app_handle(app.handle().clone());
             crate::system::webview_orchestrator::WebviewOrchestrator::global().bind_app_handle(app.handle().clone());
 
@@ -487,11 +497,6 @@ pub fn run() {
             // Step 6.12: Enqueue enabled widget windows into WebviewOrchestrator for safe serial startup
             crate::system::boot_trace::boot_scope("Step 6.12: Widgets Orchestrator Enqueue", || {
                 crate::system::widget_manager::restore_active_widgets_on_boot(&app.handle());
-            });
-
-            // Step 6.13: Verify & auto-heal autostart scheduled task to align with current executable
-            crate::system::boot_trace::boot_scope("Step 6.13: Autostart Alignment", || {
-                crate::system::autostart::sync_autostart_target_path();
             });
 
             // Step 6.14: Initialize Universal Watcher Hub and auto-load plugin watchers

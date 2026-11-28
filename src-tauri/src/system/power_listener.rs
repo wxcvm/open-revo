@@ -179,6 +179,19 @@ unsafe extern "system" fn power_wnd_proc(
         }
         WM_POWERBROADCAST => {
             let pbt = wparam.0 as u32;
+            if GLOBAL_EC.read().is_none() {
+                match pbt {
+                    PBT_APMSUSPEND => {
+                        crate::system::background_awake::release_for_sleep();
+                        set_resource_pause(ResourcePause::SystemSuspended, true);
+                    }
+                    PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => {
+                        set_resource_pause(ResourcePause::SystemSuspended, false);
+                    }
+                    _ => {}
+                }
+                return LRESULT(1);
+            }
             if pbt == PBT_APMSUSPEND {
                 crate::system::background_awake::release_for_sleep();
                 set_resource_pause(ResourcePause::SystemSuspended, true);
@@ -246,6 +259,13 @@ unsafe extern "system" fn power_wnd_proc(
             LRESULT(1)
         }
         WM_QUERYENDSESSION | WM_ENDSESSION => {
+            if GLOBAL_EC.read().is_none() {
+                if msg == WM_ENDSESSION && wparam.0 != 0 {
+                    crate::system::background_awake::release();
+                    set_resource_pause(ResourcePause::SystemSuspended, true);
+                }
+                return LRESULT(1);
+            }
             println!("[Power Guard] System is shutting down or restarting! Stopping water cooler & lighting...");
             crate::system::telemetry::set_screen_suspended(true);
             crate::system::display_tuning::reset_display_tuning_to_default();

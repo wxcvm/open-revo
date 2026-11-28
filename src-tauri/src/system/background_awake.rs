@@ -183,7 +183,7 @@ pub fn get_background_awake_status() -> AwakeStatus {
 pub fn set_background_awake(window: tauri::WebviewWindow, enable: bool, minutes: Option<u16>) -> Result<bool, String> {
     use tauri::Manager;
     if window.label() != "main" {
-        return Err("请在 OpenRevo 主窗口或托盘设置后台保活".into());
+        super::manager::authorize(&window, true)?;
     }
     update(window.app_handle(), Some(enable), minutes)
 }

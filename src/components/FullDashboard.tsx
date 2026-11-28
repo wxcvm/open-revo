@@ -43,7 +43,7 @@ interface FullDashboardProps {
   onToggleBatteryLimit: () => void;
   onSwitchRefreshRate: (hz: number, invokeBackend?: boolean) => void;
   onToggleWinKey: () => void;
-  onToggleAutostart: () => void;
+  onOpenStartupSettings: () => void;
   onToggleOemService?: (takeOver: boolean) => Promise<void> | void;
   onCollapseDashboard: () => void;
   onMinimize: () => void;
@@ -70,7 +70,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
   onToggleBatteryLimit,
   onSwitchRefreshRate,
   onToggleWinKey,
-  onToggleAutostart,
+  onOpenStartupSettings,
   onToggleOemService,
   onCollapseDashboard,
   onMinimize,
@@ -723,7 +723,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
               osdConfig={osdConfig}
               onUpdateOsdConfig={handleUpdateOsdConfig}
               onToggleWinKey={onToggleWinKey}
-              onToggleAutostart={onToggleAutostart}
+              onOpenStartupSettings={onOpenStartupSettings}
               onToggleWaterCooler={(enabled) => setLocalWaterCoolerEnabled(enabled)}
               moduleToggles={moduleToggles}
               onToggleModule={handleToggleModule}

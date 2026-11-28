@@ -16,14 +16,30 @@ export type WindowsEvent = {
 export type Peak = { time_ms: number; metric: 'memory' | 'cpu' | 'disk' | 'network'; value: number };
 export type UpdateInfo = { time_ms: number; title: string; result: number; source?: string };
 
-export type ScanTarget = { kind: 'volume'; root: string } | { kind: 'folder' } | { kind: 'cleanup' };
+export type ScanTarget = { kind: 'volume'; root: string; verify_duplicates?: boolean }
+  | { kind: 'folder'; verify_duplicates?: boolean } | { kind: 'cleanup' };
+
+export type VolumeSample = {
+  captured_ms: number;
+  totals: { total: number; free: number; used: number; reserved?: number | null; pool_unavailable?: number | null } | null;
+  classified: [number, number, number, number, number];
+  unresolved: number | null;
+  recycle: { bytes: number; items: number } | null;
+  skipped: number;
+  unknown_allocation: number;
+};
+export type VolumeOverview = {
+  current: VolumeSample; previous: VolumeSample | null; save_available: boolean; saved: boolean; notice: string | null;
+};
+export type Session = { hardware: boolean };
+export type AwakeState = { enabled: boolean; remaining_ms: number | null };
 export type Section = 'tree' | 'largest' | 'duplicates' | 'cleanup';
 export type ScanRow = {
   id: number; path: string; category: string; logical: number; allocated: number | null; count: number; group: number | null;
 };
 export type Scan = {
   id: number; kind: 'space' | 'cleanup'; state: 'running' | 'canceling' | 'canceled' | 'partial' | 'complete' | 'failed';
-  scope: string; volume?: Volume | null; notes: string[]; error?: string | null; total: number[];
+  scope: string; volume?: Volume | null; overview?: VolumeOverview | null; duplicates_requested?: boolean; notes: string[]; error?: string | null; total: number[];
   progress: { files: number; skipped: number; logical: number; allocated: number };
   stats?: { files: number; logical: number; allocated: number; skipped: number; aliases: number;
     unknown_allocation: number; uncategorized: number; cleanup_limited: boolean; duplicates_limited: boolean } | null;
@@ -40,6 +56,10 @@ export type Receipt = {
 export type ShellPage = 'apps' | 'startup' | 'storage' | 'update' | 'security' | 'recycle';
 
 export const manager = {
+  session: () => invoke<Session>('manager_session'),
+  awakeStatus: () => invoke<AwakeState>('get_background_awake_status'),
+  setAwake: (enable: boolean, minutes?: number) => invoke<boolean>('set_background_awake', { enable, minutes }),
+  saveVolume: (id: number) => invoke<Scan>('manager_save_volume_snapshot', { id }),
   health: () => invoke<Health>('manager_health'),
   windows: <T>(kind: 'apps' | 'startup' | 'health' | 'events', hours?: number) =>
     invoke<T>('manager_inventory', { kind, hours }),

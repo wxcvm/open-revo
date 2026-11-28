@@ -1,4 +1,6 @@
 pub mod autostart;
+#[cfg(windows)]
+pub(crate) mod desktop_session;
 pub mod background_awake;
 pub mod config;
 pub mod display;

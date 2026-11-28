@@ -23,7 +23,7 @@ interface MiniDrawerProps {
   onToggleBatteryLimit: (limit?: number) => void;
   onSwitchRefreshRate: (hz: number, invokeBackend?: boolean) => void;
   onToggleWinKey: () => void;
-  onToggleAutostart: () => void;
+  onOpenStartupSettings: () => void;
   onToggleOemService: (takeOver: boolean) => Promise<void>;
   onExpandDashboard: (tab?: 'overview' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor' | 'custom_tuning') => void;
   onOpenSponsor: () => void;
@@ -41,7 +41,7 @@ export const MiniDrawer: React.FC<MiniDrawerProps> = ({
   onToggleBatteryLimit,
   onSwitchRefreshRate,
   onToggleWinKey,
-  onToggleAutostart,
+  onOpenStartupSettings,
   onToggleOemService,
   onExpandDashboard,
   onOpenSponsor,
@@ -243,7 +243,7 @@ export const MiniDrawer: React.FC<MiniDrawerProps> = ({
         <div className="mini-slot-footer" data-slot="footer">
           <DrawerFooter
             status={status}
-            onToggleAutostart={onToggleAutostart}
+            onOpenStartupSettings={onOpenStartupSettings}
             onToggleOemService={onToggleOemService}
             onExpandDashboard={onExpandDashboard}
             onClose={onClose}

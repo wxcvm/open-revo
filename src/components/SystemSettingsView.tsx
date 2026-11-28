@@ -36,7 +36,7 @@ export interface SystemSettingsViewProps {
   osdConfig: OsdConfig;
   onUpdateOsdConfig: (cfg: OsdConfig) => void;
   onToggleWinKey?: () => void;
-  onToggleAutostart: () => void;
+  onOpenStartupSettings: () => void;
   onToggleWaterCooler?: (enabled: boolean) => void;
   moduleToggles?: Record<string, boolean>;
   onToggleModule?: (id: string, enabled: boolean) => void;
@@ -50,7 +50,7 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
   osdConfig,
   onUpdateOsdConfig: handleUpdateOsdConfig,
   onToggleWinKey: _onToggleWinKey,
-  onToggleAutostart,
+  onOpenStartupSettings,
   onToggleWaterCooler: _onToggleWaterCooler,
   moduleToggles: _moduleToggles,
   onToggleModule: _onToggleModule,
@@ -603,16 +603,12 @@ export const SystemSettingsView: React.FC<SystemSettingsViewProps> = ({
             </div>
           </div>
 
-          {/* 开机自动启动 */}
           <div className="quick-row">
             <div>
-              <div className="sys-row-label">开机自动启动 (最小化至托盘)</div>
-              <div className="sys-row-desc">开机自动加载驱动与上次配置</div>
+              <div className="sys-row-label">Windows 启动项</div>
+              <div className="sys-row-desc">登录启动由 Windows 管理；OpenRevo 不登记或修复管理员自启任务。</div>
             </div>
-            <RevSwitch
-              checked={!!status.autostart}
-              onChange={onToggleAutostart}
-            />
+            <button type="button" className="toggle-btn" onClick={onOpenStartupSettings}>打开 Windows 启动项</button>
           </div>
 
           {/* 解除离电限制 (允许电池下启用狂暴与自定义) */}

@@ -10,7 +10,7 @@ import {
 
 interface DrawerFooterProps {
   status: HardwareState;
-  onToggleAutostart: () => void;
+  onOpenStartupSettings: () => void;
   onToggleOemService: (takeOver: boolean) => Promise<void>;
   onExpandDashboard: (tab?: 'overview' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'sponsor' | 'custom_tuning') => void;
   onClose?: () => void;
@@ -20,7 +20,7 @@ interface DrawerFooterProps {
 
 export const DrawerFooter: React.FC<DrawerFooterProps> = ({
   status,
-  onToggleAutostart,
+  onOpenStartupSettings,
   onToggleOemService,
   onExpandDashboard,
   showOemModal,
@@ -39,7 +39,7 @@ export const DrawerFooter: React.FC<DrawerFooterProps> = ({
 
   return (
     <>
-      {/* 底部操作区：开机自启、官方接管切换、展开大面板与退出 */}
+      {/* 底部操作区：Windows 启动项入口、官方接管切换、展开大面板与退出 */}
       <div
         style={{
           display: 'flex',
@@ -52,30 +52,9 @@ export const DrawerFooter: React.FC<DrawerFooterProps> = ({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* 开机自启 */}
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              fontSize: '10.5px',
-              color: 'var(--text-dim)',
-              cursor: 'pointer',
-              userSelect: 'none',
-            }}
-            onClick={onToggleAutostart}
-            title={status.autostart ? '已启用开机自启动 (最小化至托盘)' : '未启用开机自启'}
-          >
-            <input
-              type="checkbox"
-              checked={!!status.autostart}
-              readOnly
-              style={{ accentColor: '#38bdf8', cursor: 'pointer', margin: 0 }}
-            />
-            <span style={{ color: status.autostart ? '#f1f5f9' : 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-              开机自启
-            </span>
-          </label>
+          <button type="button" className="toggle-btn" onClick={onOpenStartupSettings}>
+            Windows 启动项
+          </button>
 
           {/* 接管/恢复官方控制台按钮 (若机器未安装官方控制台则隐藏) */}
           {status.oem_installed && !status.vendor_bus_selected && (

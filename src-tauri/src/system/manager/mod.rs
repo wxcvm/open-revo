@@ -3,7 +3,12 @@
 mod inventory;
 mod startup;
 mod storage;
+mod volume_overview;
 mod win;
+
+pub(crate) fn verify_interactive_account() -> Result<(), String> {
+    win::verify_account()
+}
 
 pub(crate) fn process_group(h: windows::Win32::Foundation::HANDLE) -> Option<String> {
     use std::hash::{DefaultHasher, Hash, Hasher};
@@ -80,6 +85,21 @@ pub(crate) async fn open_pc_manager(
     if window.label() != "main" {
         return Err("仅从主窗口打开管理中心".into());
     }
+    show(&app).await
+}
+
+#[tauri::command]
+pub(crate) fn manager_session(
+    window: WebviewWindow,
+    session: tauri::State<'_, super::desktop_session::Session>,
+) -> Result<super::desktop_session::Session, String> {
+    authorize(&window, true)?;
+    Ok(super::desktop_session::Session {
+        hardware: session.hardware,
+    })
+}
+
+pub(crate) async fn show(app: &tauri::AppHandle) -> Result<(), String> {
     static OPEN_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     let _guard = OPEN_LOCK
         .get_or_init(|| tokio::sync::Mutex::new(()))
@@ -92,7 +112,7 @@ pub(crate) async fn open_pc_manager(
     }
     // No opener, no extension runtime, and an isolated WebView2 profile. The extension IPC
     // bridge can open this window, but it cannot read it or issue its management commands.
-    let w = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("manager.html".into()))
+    let w = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("manager.html".into()))
         .title("OpenRevo 管理中心")
         .inner_size(1140.0, 802.0)
         .min_inner_size(728.0, 550.0)
@@ -144,8 +164,15 @@ pub(crate) async fn manager_shell(window: WebviewWindow, page: String) -> Result
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Scan {
-    Volume { root: String },
-    Folder,
+    Volume {
+        root: String,
+        #[serde(default)]
+        verify_duplicates: bool,
+    },
+    Folder {
+        #[serde(default)]
+        verify_duplicates: bool,
+    },
     Cleanup,
 }
 #[tauri::command]
@@ -156,24 +183,26 @@ pub(crate) async fn manager_scan(
     let owner = authorize(&window, true)?;
     blocking(move || {
         win::verify_account()?;
-        let root = match target {
-            Scan::Volume { root }
-                if root.as_bytes().len() == 3
-                    && root.as_bytes()[0].is_ascii_uppercase()
-                    && root.ends_with(":\\") =>
+        let (root, verify_duplicates) = match target {
+            Scan::Volume {
+                root,
+                verify_duplicates,
+            } if root.as_bytes().len() == 3
+                && root.as_bytes()[0].is_ascii_uppercase()
+                && root.ends_with(":\\") =>
             {
-                Some(PathBuf::from(root))
+                (Some(PathBuf::from(root)), verify_duplicates)
             }
             Scan::Volume { .. } => return Err("无效的本地卷标识".into()),
-            Scan::Folder => match win::pick_folder(owner)? {
-                Some(path) => Some(path),
+            Scan::Folder { verify_duplicates } => match win::pick_folder(owner)? {
+                Some(path) => (Some(path), verify_duplicates),
                 None => return Ok(None),
             },
-            Scan::Cleanup => None,
+            Scan::Cleanup => (None, false),
         };
         win::as_user(|| {
             let checked = root.as_ref().map(|p| win::checked_path(p)).transpose()?;
-            storage::start(checked).map(Some)
+            storage::start(checked, verify_duplicates).map(Some)
         })
     })
     .await
@@ -186,6 +215,15 @@ pub(crate) async fn manager_scan_status(
     authorize(&window, true)?;
     storage::status(id)
 }
+#[tauri::command]
+pub(crate) async fn manager_save_volume_snapshot(
+    window: WebviewWindow,
+    id: u64,
+) -> Result<storage::Status, String> {
+    authorize(&window, true)?;
+    blocking(move || win::as_user(|| storage::save_volume_snapshot(id))).await
+}
+
 #[tauri::command]
 pub(crate) async fn manager_scan_page(
     window: WebviewWindow,

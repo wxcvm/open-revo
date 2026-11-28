@@ -193,7 +193,7 @@ pub(super) fn as_user<T>(f: impl FnOnce() -> Outcome<T>) -> Outcome<T> {
     f()
 }
 
-fn known_folder(id: &windows::core::GUID) -> Outcome<PathBuf> {
+pub(super) fn known_folder(id: &windows::core::GUID) -> Outcome<PathBuf> {
     unsafe {
         let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, HANDLE::default()).map_err(error)?;
         let out = PathBuf::from(OsString::from_wide(p.as_wide()));
