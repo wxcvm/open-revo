@@ -9,7 +9,7 @@ type Mode = 'foreground' | 'background' | 'paused' | 'idle';
 type HistoryState = { enabled: boolean; error: string | null };
 type Point = { time_ms: number; summary: Maybe[]; selected: Maybe[]; gap_before: boolean };
 type Item = { key: string; name: string };
-type Process = { key: string | null; pid: number; name: string; private_resident: Maybe; private_commit: Maybe; cpu_percent: Maybe };
+type Process = { key: string | null; pid: number; name: string; group?: string | null; private_resident: Maybe; private_commit: Maybe; cpu_percent: Maybe };
 type Disk = Item & { read: Maybe; write: Maybe; read_iops: Maybe; write_iops: Maybe };
 type Interface = Item & { physical: boolean; up: boolean; rx: Maybe; tx: Maybe };
 type Memory = Record<'installed' | 'visible' | 'reserved' | 'available' | 'used' | 'standby' | 'free_zero' |
@@ -87,36 +87,71 @@ function MemoryBreakdown({ memory: m }: { memory?: Memory }) {
 }
 
 type Sort = 'private_resident' | 'private_commit' | 'cpu_percent';
-export function ProcessList({ processes, source, sort, onSort, pick, picked }:
-{ processes: Process[]; source?: string | null; sort: Sort; onSort: (key: Sort) => void; pick: (p: Process) => void; picked?: string }) {
+export function ProcessList({ processes, source, sort, onSort, pick, picked, onClose }:
+{ processes: Process[]; source?: string | null; sort: Sort; onSort: (key: Sort) => void; pick: (p: Process) => void; picked?: string; onClose?: (key: string) => void }) {
   const [query, setQuery] = useState('');
   const [limit, setLimit] = useState(30);
+  const [grouped, setGrouped] = useState(true);
+  const [expanded, setExpanded] = useState<string[]>([]);
   const rows = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
     return processes.filter(p => p.name.toLocaleLowerCase().includes(q) || String(p.pid).includes(q))
       .sort((a, b) => (b[sort] ?? -1) - (a[sort] ?? -1) || a.pid - b.pid);
   }, [processes, query, sort]);
-  const headers: Array<[Sort, string]> = [['private_resident', '私有驻留'], ['private_commit', '私有提交'], ['cpu_percent', '全机 CPU']];
+  const total = (members: Process[], metric: Sort): Maybe => {
+    const values = members.map(p => p[metric]).filter((p): p is number => p != null);
+    return values.length ? values.reduce((a, b) => a + b, 0) : null;
+  };
+  const shown = useMemo(() => {
+    const groups = new Map<string, Process[]>();
+    rows.forEach(p => {
+      const key = grouped && p.group ? 'app:' + p.group : 'pid:' + p.pid;
+      const members = groups.get(key) ?? [];
+      members.push(p);
+      groups.set(key, members);
+    });
+    return Array.from(groups.entries()).sort(([, a], [, b]) =>
+      (total(b, sort) ?? -1) - (total(a, sort) ?? -1) || a[0].pid - b[0].pid);
+  }, [rows, grouped, sort]);
+  const heads: Array<[Sort, string]> = [['private_resident', '私有驻留'], ['private_commit', '私有提交'], ['cpu_percent', '全机 CPU']];
+  const cell = (members: Process[], metric: Sort) => {
+    const n = total(members, metric);
+    if (n == null) return '未取得';
+    return (members.some(p => p[metric] == null) ? '≥ ' : '') + (metric === 'cpu_percent' ? percent(n) : bytes(n));
+  };
+  const row = (p: Process, child = false) => <tr key={p.key ?? p.pid}
+    className={(p.key != null && p.key === picked ? 'is-picked ' : '') + (child ? 'resource-process-child' : '')}>
+    <td>{p.key ? <button type="button" aria-pressed={p.key === picked} title={p.name} onClick={() => pick(p)}>{p.name}</button> : p.name}</td>
+    <td>{p.pid}</td><td>{bytes(p.private_resident)}</td><td>{bytes(p.private_commit)}</td><td>{percent(p.cpu_percent)}</td>
+    {onClose && <td>{p.key && <button type="button" aria-label={'预览关闭 ' + p.name + ' ' + p.pid} onClick={() => onClose(p.key!)}>预览关闭</button>}</td>}
+  </tr>;
   return <section className="resource-panel" aria-label="进程用量排名">
     <div className="resource-line">
       <h4>进程用量排名</h4>
       <input className="resource-search" type="search" aria-label="搜索名称或 PID" placeholder="搜索名称或 PID"
         value={query} onChange={e => { setQuery(e.currentTarget.value); setLimit(30); }} />
     </div>
-    <p>{source ? `${source} · ${rows.length} / ${processes.length} 项 · 选择名称查看近期变化` : '进程计数器尚未就绪或不可用。'} 私有提交不计入物理内存对账。</p>
+    <div className="resource-actions"><button className="toggle-btn" aria-pressed={grouped}
+      onClick={() => { setGrouped(g => !g); setLimit(30); }}>{grouped ? '按程序分组' : '逐进程显示'}</button>
+      <span>仅按已读到的同一可执行文件路径分组；未知路径不合并。符号 ≥ 表示部分成员未取得读数。</span>
+    </div>
+    <p>{source ? source + ' · ' + rows.length + ' / ' + processes.length + ' 个进程 · 选择名称查看近期变化' : '进程计数器尚未就绪或不可用。'} 私有提交不计入物理内存对账。</p>
     <div className="resource-table-wrap"><table className="resource-table">
-      <thead><tr><th scope="col">名称</th><th scope="col">PID</th>{headers.map(([key, label]) =>
+      <thead><tr><th scope="col">名称</th><th scope="col">PID</th>{heads.map(([key, label]) =>
         <th key={key} scope="col" aria-sort={sort === key ? 'descending' : 'none'}>
           <button type="button" onClick={() => { onSort(key); setLimit(30); }}>{label}{sort === key ? ' ↓' : ''}</button>
-        </th>)}</tr></thead>
-      <tbody>{rows.slice(0, limit).map(p => <tr key={p.key ?? p.pid} className={p.key != null && p.key === picked ? 'is-picked' : ''}>
-        <td>{p.key ? <button type="button" aria-pressed={p.key === picked} title={p.name} onClick={() => pick(p)}>{p.name}</button> : p.name}</td>
-        <td>{p.pid}</td>
-        <td>{bytes(p.private_resident)}</td><td>{bytes(p.private_commit)}</td><td>{percent(p.cpu_percent)}</td>
-      </tr>)}</tbody>
+        </th>)}{onClose && <th scope="col">应用操作</th>}</tr></thead>
+      <tbody>{shown.slice(0, limit).flatMap(([key, members]) => members.length === 1 ? [row(members[0])] : [
+        <tr key={key} className="resource-process-group">
+          <td><button type="button" aria-expanded={expanded.includes(key)} onClick={() =>
+            setExpanded(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key])}>{members[0].name}（{members.length} 个进程）</button></td>
+          <td>分组</td>{heads.map(([metric]) => <td key={metric}>{cell(members, metric)}</td>)}{onClose && <td>展开后操作</td>}
+        </tr>,
+        ...(expanded.includes(key) ? members.map(p => row(p, true)) : []),
+      ])}</tbody>
     </table></div>
     {rows.length === 0 && <p>{query ? '没有匹配项' : '还没有进程样本'}</p>}
-    {rows.length > limit && <button className="toggle-btn resource-button" onClick={() => setLimit(limit + 50)}>显示更多（{rows.length - limit}）</button>}
+    {shown.length > limit && <button className="toggle-btn resource-button" onClick={() => setLimit(limit + 50)}>显示更多（{shown.length - limit}）</button>}
   </section>;
 }
 
@@ -222,7 +257,7 @@ const modeHelp: Record<Tab, string> = {
   磁盘: '来自 Windows 物理磁盘性能计数器，显示吞吐和操作次数；不是文件、卷容量或进程 I/O。卷容量仍可在监控概览查看。',
   网络: '物理网卡总量不含虚拟接口，避免同一流量叠加；虚拟接口可单独查看。不归因到进程或连接。',
 };
-export function ResourceOverview() {
+export function ResourceOverview({ onCloseProcess }: { onCloseProcess?: (key: string) => void } = {}) {
   const [tab, setTab] = useState<Tab>('内存');
   const [showHistory, setShowHistory] = useState(false);
   const [live, setLive] = useState<Live>();
@@ -328,7 +363,7 @@ export function ResourceOverview() {
         {tab === '内存' && <MemoryBreakdown memory={snapshot?.memory} />}
         {tab === 'CPU' && <p>{snapshot?.logical_cpus ? `Windows 可用逻辑处理器：${snapshot.logical_cpus} 个` : '逻辑处理器数量未取得。'}</p>}
         {(tab === '内存' || tab === 'CPU') && <ProcessList key={tab}
-          processes={snapshot?.processes ?? []} source={snapshot?.process_source} sort={sort} onSort={setSort} pick={pickProcess} picked={selectedKey ?? undefined} />}
+          processes={snapshot?.processes ?? []} source={snapshot?.process_source} sort={sort} onSort={setSort} pick={pickProcess} picked={selectedKey ?? undefined} onClose={onCloseProcess} />}
         {(tab === '磁盘' || tab === '网络') && <section className="resource-panel">
           <h4>{tab === '磁盘' ? '按物理磁盘' : '按网络接口'}</h4>
           <DeviceList devices={tab === '磁盘' ? snapshot?.disks ?? [] : snapshot?.interfaces ?? []} network={tab === '网络'} pick={pick} picked={selectedKey ?? undefined} />

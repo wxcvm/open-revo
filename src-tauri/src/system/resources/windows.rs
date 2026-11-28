@@ -303,6 +303,7 @@ impl ProcessQuery {
                     .position(|n| *n == 0)
                     .unwrap_or(entry.szExeFile.len());
                 let mut row = Process {
+                    group: None,
                     key: None,
                     pid,
                     name: String::from_utf16_lossy(&entry.szExeFile[..end]),
@@ -329,6 +330,7 @@ impl ProcessQuery {
                         {
                             let id = (pid, created);
                             row.key = Some(format!("proc:{pid}:{created}"));
+                            row.group = crate::system::manager::process_group(handle);
                             self.prev_cpu.insert(id, (now, cpu_time));
                             row.cpu_percent = previous.get(&id).and_then(|(at, cpu)| {
                                 let pct =

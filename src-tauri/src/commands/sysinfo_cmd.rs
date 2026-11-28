@@ -90,23 +90,26 @@ fn save_csv_dialog(owner: usize, csv: &str, resource: bool) -> Result<Option<Str
 }
 
 fn authorize_resource(window: &tauri::WebviewWindow) -> Result<(), String> {
-    if window.label() == "main" { Ok(()) } else { Err("请从主窗口访问资源监控".into()) }
+    if window.label() == "main" { return Ok(()); }
+    #[cfg(windows)]
+    if crate::system::manager::authorize(window, false).is_ok() { return Ok(()); }
+    Err("请从主窗口或管理中心访问资源监控".into())
 }
 
 #[tauri::command]
 pub async fn get_resource_snapshot(window: tauri::WebviewWindow, selected: Option<String>) -> Result<resources::Live, String> {
     authorize_resource(&window)?;
     if !window.is_visible().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
-        resources::release()?;
+        resources::release_view(window.label() != "main")?;
         return Err("主窗口已隐藏，实时明细已暂停".into());
     }
-    resources::live(selected)
+    resources::live(selected, window.label() != "main")
 }
 
 #[tauri::command]
 pub async fn release_resource_view(window: tauri::WebviewWindow) -> Result<(), String> {
     authorize_resource(&window)?;
-    resources::release()
+    resources::release_view(window.label() != "main")
 }
 
 #[tauri::command]

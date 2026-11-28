@@ -4003,3 +4003,65 @@ body,
 [data-theme="mono"] .resource-tone-2 { --resource-color: var(--status-ok); }
 [data-theme="mono"] .resource-tone-4 { --resource-color: var(--color-brand); }
 [data-theme="mono"] path.resource-tone-1 { stroke-dasharray: 4 3; }
+
+/* First-party Windows management window (no hardware/plug-in content). */
+.manager-shell {
+  height: 100vh;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+.manager-hero, .manager-nav, .manager-content {
+  width: min(100%, 1320px);
+  margin-inline: auto;
+  padding-inline: clamp(12px, 3.5vw, 40px);
+}
+.manager-hero { padding-block: 20px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.manager-hero h1 { font-size: 28px; margin: 4px 0; }
+.manager-hero p, .manager-heading p { margin: 0; }
+.manager-hero small, .manager-hero p, .manager-heading small { color: var(--text-muted); }
+.manager-badge { padding: 6px 10px; border: 1px solid var(--border-medium); border-radius: var(--radius-full); color: var(--text-secondary); font-size: 12px; }
+.manager-nav { display: flex; flex-wrap: wrap; gap: 7px; padding-block: 10px; border-bottom: 1px solid var(--border-medium); }
+.manager-nav button, .manager-shell .toggle-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: normal; }
+.manager-content { flex: 1; overflow: auto; min-height: 0; min-width: 0; padding-block: 15px 28px; }
+.manager-top-action { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.manager-stack { display: grid; gap: 12px; min-width: 0; }
+.manager-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.manager-heading h2, .manager-card h3 { margin: 0; }
+.manager-shell h3 { display: flex; align-items: center; gap: 7px; }
+.manager-card strong { font-size: 23px; font-variant-numeric: tabular-nums; margin-top: 5px; display: block; }
+.manager-card p, .manager-warnings, .manager-receipt small { color: var(--text-muted); }
+.manager-volumes { padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+.manager-volumes li { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 9px; margin-bottom: 9px; }
+.manager-volumes progress { inline-size: 100%; block-size: 0.5rem; grid-column: 1 / -1; accent-color: var(--text-secondary); }
+.manager-map { margin: 12px 0; }
+.manager-map svg { width: 100%; height: 44px; border-radius: var(--radius-md); display: block; }
+.manager-map-rest { fill: var(--surface-pill-hover); }
+.manager-map .resource-legend button { border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; max-width: 100%; overflow-wrap: anywhere; }
+.manager-table td small, .manager-receipt li small, .manager-data-pills span small { display: block; color: var(--text-muted); }
+.manager-path { overflow-wrap: anywhere; word-break: break-word; }
+.manager-data-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.manager-data-pills span { background: var(--surface-pill); border-radius: var(--radius-md); padding: 7px 9px; }
+.manager-data-pills b { margin-inline-start: 3px; }
+.manager-timeline { list-style: none; padding: 0; display: grid; gap: 6px; }
+.manager-timeline li, .manager-receipt, .manager-error, .manager-notice { border: 1px solid var(--border-medium); border-radius: var(--radius-md); background: var(--surface-pill); }
+.manager-event { display: flex; flex-wrap: wrap; justify-content: space-between; width: 100%; padding: 8px 10px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; gap: 5px 15px; }
+.manager-event time, .manager-event span { color: var(--text-muted); }
+.manager-event-detail { border-top: 1px solid var(--border-medium); padding: 8px 10px; overflow-wrap: anywhere; }
+.manager-event-detail ul { padding-left: 20px; }
+.manager-event-detail li { border: 0; background: none; }
+.manager-receipt, .manager-error, .manager-notice { margin-block: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.manager-error { color: var(--status-error); }
+.manager-warnings li { overflow-wrap: anywhere; }
+.manager-preview-list { overflow: auto; max-height: 26vh; padding-left: 18px; overflow-wrap: anywhere; }
+.manager-modal .sys-modal-card { width: min(90vw, 620px); }
+.resource-process-child > td:first-child { padding-inline-start: 19px; }
+.resource-process-group > td { background: var(--surface-pill); }
+@media (max-width: 730px) {
+  .manager-card-grid { grid-template-columns: 1fr; }
+  .manager-hero { padding-block: 11px 5px; }
+  .manager-badge { display: none; }
+}

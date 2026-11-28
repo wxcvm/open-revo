@@ -40,6 +40,7 @@ tokio = { version = "1", features = ["time", "sync", "macros"] }
 semver = "1.0"
 ureq = { version = "2.10", default-features = false, features = ["json", "native-tls"] }
 sha2 = "0.10"
+winreg = { version = "0.55", features = ["transactions"] }
 rhai = { version = "1.19", features = ["sync", "no_module", "no_custom_syntax", "no_closure", "no_optimize"] }
 windows = { version = "0.58", features = [
     "Win32_Graphics_Gdi",
@@ -48,7 +49,9 @@ windows = { version = "0.58", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    "Win32_System_SecurityCenter",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Power",
     "Win32_System_Performance",

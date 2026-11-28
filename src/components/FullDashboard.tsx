@@ -82,6 +82,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
   onPreviewFormFactor: propOnPreviewFormFactor,
 }) => {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab || 'overview');
+  const [managerError, setManagerError] = useState('');
   const [resourceView, setResourceView] = useState(false);
   const [isCustomTuningOpen, setIsCustomTuningOpen] = useState(initialOpenCustomTuning);
   const [showOemModal, setShowOemModal] = useState(false);
@@ -622,7 +623,11 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
               return (
                 <button
                   key={slot.id}
-                  onClick={() => setActiveTab(slot.id)}
+                  onClick={() => {
+                    setManagerError('');
+                    if (slot.id !== 'manager') { setActiveTab(slot.id); return; }
+                    void invoke('open_pc_manager').catch(e => setManagerError(String(e)));
+                  }}
                   className={`nav-tab ${slot.tabClassName} ${isActive ? 'active' : ''}`}
                 >
                   <IconComponent size={14} className={slot.iconClass || 'w-3.5 h-3.5'} />
@@ -651,6 +656,7 @@ export const FullDashboard: React.FC<FullDashboardProps> = ({
 
       {/* Main Body Viewport Slot */}
       <div ref={viewportRef} className="shell-viewport" data-slot="viewport">
+        {managerError && <p role="alert" className="manager-error">管理中心：{managerError}</p>}
         {activeTab === 'overview' && (
           <ModuleErrorBoundary moduleName="状态概览">
             <OverviewView

@@ -103,7 +103,7 @@ pub struct HistoryStatus {
 
 #[derive(Default)]
 struct State {
-    lease: Option<Instant>,
+    leases: [Option<Instant>; 2],
     snapshot: Option<Snapshot>,
     frames: VecDeque<Frame>,
 }
@@ -147,10 +147,9 @@ fn gates(state: &State, enabled: bool, now: Instant) -> (Mode, u32) {
     let (visible, suspended, epoch) = super::telemetry::resource_gates();
     let mode = if suspended {
         Mode::Paused
-    } else if visible
-        && state
-            .lease
-            .is_some_and(|last| now.saturating_duration_since(last) < LEASE)
+    } else if state.leases.iter().enumerate().any(|(i, last)| {
+        (i == 1 || visible) && last.is_some_and(|last| now.saturating_duration_since(last) < LEASE)
+    })
     {
         Mode::Foreground
     } else if enabled {
@@ -172,7 +171,7 @@ fn status(h: &History) -> HistoryStatus {
         error: h.error.clone(),
     }
 }
-pub fn live(selected: Option<String>) -> Result<Live, String> {
+pub fn live(selected: Option<String>, manager: bool) -> Result<Live, String> {
     if selected.as_ref().is_some_and(|s| s.len() > 512) {
         return Err("资源标识过长".into());
     }
@@ -182,7 +181,7 @@ pub fn live(selected: Option<String>) -> Result<Live, String> {
     let now = Instant::now();
     let wall = wall_ms();
     let (before, _) = gates(&state, history.enabled, now);
-    state.lease = Some(now);
+    state.leases[usize::from(manager)] = Some(now);
     let (mode, _) = gates(&state, history.enabled, now);
     if mode != before {
         m.signal.notify_one();
@@ -216,14 +215,36 @@ pub fn live(selected: Option<String>) -> Result<Live, String> {
         mode,
     })
 }
-pub fn release() -> Result<(), String> {
+pub fn release_view(manager: bool) -> Result<(), String> {
     let m = monitor()?;
     let mut state = m.state.lock();
-    state.lease = None;
-    state.snapshot = None;
+    state.leases[usize::from(manager)] = None;
+    if state.leases.iter().all(Option::is_none) { state.snapshot = None; }
     m.signal.notify_one();
     Ok(())
 }
+#[derive(Clone, Copy, Serialize)]
+pub struct Peak { pub time_ms: u64, pub metric: &'static str, pub value: f64 }
+
+pub fn recent_peaks() -> Result<Vec<Peak>, String> {
+    let m = monitor()?;
+    let now = wall_ms();
+    let mut peaks = std::collections::BTreeMap::<(u64, usize), Peak>::new();
+    for frame in &m.state.lock().frames {
+        if now.saturating_sub(frame.time_ms) > RECENT_MS { continue; }
+        let net = frame.summary[8].zip(frame.summary[9]).map(|(a, b)| a + b);
+        let disk = frame.summary[4].zip(frame.summary[5]).map(|(a, b)| a + b);
+        for (i, (metric, value)) in [("memory", frame.summary[0]), ("cpu", frame.summary[3]),
+            ("disk", disk), ("network", net)].into_iter().enumerate() {
+            if let Some(n) = value.filter(|n| n.is_finite() && *n > 0.0) {
+                let peak = peaks.entry((frame.time_ms / 60_000, i)).or_insert(Peak { time_ms: frame.time_ms, metric, value: n });
+                if n > peak.value { *peak = Peak { time_ms: frame.time_ms, metric, value: n }; }
+            }
+        }
+    }
+    Ok(peaks.into_values().rev().collect())
+}
+
 pub fn read_history(hours: u16) -> Result<Vec<Minute>, String> {
     monitor()?.history.lock().read(wall_ms(), hours)
 }
@@ -329,7 +350,11 @@ fn worker() {
         let mut state = state;
         let delay = if mode == Mode::Foreground {
             state
-                .lease
+                .leases
+                .iter()
+                .flatten()
+                .copied()
+                .max()
                 .map(|lease| (lease + LEASE).min(next_mark))
                 .unwrap_or(now)
         } else {

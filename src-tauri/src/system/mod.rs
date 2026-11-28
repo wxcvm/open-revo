@@ -16,6 +16,8 @@ pub mod power_mode;
 pub mod power;
 pub mod logger;
 pub mod hardware_probe;
+#[cfg(windows)]
+pub mod manager;
 pub mod model_engine;
 pub mod osd_window;
 pub mod display_tuning;

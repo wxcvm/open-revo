@@ -9,11 +9,12 @@ import {
   Layers,
   Heart,
   Puzzle,
+  ShieldCheck,
   LucideIcon,
 } from 'lucide-react';
 import { HardwareState } from '../types/hardware';
 
-export type BuiltinTabId = 'overview' | 'monitor' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'plugins' | 'sponsor';
+export type BuiltinTabId = 'overview' | 'monitor' | 'manager' | 'gpu' | 'tuning' | 'lighting' | 'water' | 'system' | 'plugins' | 'sponsor';
 
 export interface ModelCapabilities {
   id?: string;
@@ -98,6 +99,15 @@ export const BUILTIN_MODULE_SLOTS: BuiltinModuleSlot[] = [
     order: 15,
     icon: Activity,
     description: 'CPU / 显卡 / 内存 / 卷容量 / 风扇转速 分段式实时遥测仪表盘',
+    isVisible: () => true,
+  },
+  {
+    id: 'manager',
+    name: '管理中心',
+    tabClassName: 'tab-system',
+    order: 17,
+    icon: ShieldCheck,
+    description: '电脑体检、资源去向、磁盘与清理、启动项、软件及故障时间线',
     isVisible: () => true,
   },
   {
